@@ -1,0 +1,6 @@
+@Andy.Agentic_HostAddress = http://localhost:5030
+
+GET {{Andy.Agentic_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###
