@@ -29,20 +29,45 @@ Andy Agentic provides a unified web-based interface for orchestrating AI agents 
 - **Agent Orchestration**: Create complex multi-agent workflows
 - **Real-time Monitoring**: Track agent activities and performance
 - **Extensible Architecture**: Plugin system for custom integrations
+- **Streaming Chat**: Real-time streaming responses with OpenAI-compatible format
+- **Tool Execution**: Dynamic tool calling and execution framework
+- **Session Management**: Persistent chat sessions with history tracking
+- **Tag System**: Organize and categorize agents with flexible tagging
 
 ## Technology Stack
 
-- **Backend**: ASP.NET Core 8.0 Web API
-- **Frontend**: [To be implemented]
-- **Testing**: xUnit
-- **Platform**: Cross-platform (.NET 8)
+- **Backend**: ASP.NET Core 9.0 Web API
+- **Database**: MySQL with Entity Framework Core
+- **Architecture**: Clean Architecture with Domain-Driven Design
+- **Mapping**: AutoMapper for object-to-object mapping
+- **Testing**: xUnit with code coverage
+- **Platform**: Cross-platform (.NET 9)
+- **LLM Integration**: OpenAI API, Ollama local models
+- **Real-time**: Server-Sent Events (SSE) for streaming
 
 ## Prerequisites
 
-- .NET 8.0 SDK or later
+- .NET 9.0 SDK or later
+- MySQL Server 8.0 or later
 - A modern web browser
 
 ## Getting Started
+
+### Database Setup
+
+1. **Install MySQL Server** (8.0 or later)
+2. **Create a database** for the application:
+   ```sql
+   CREATE DATABASE andy_agentic;
+   ```
+3. **Update connection string** in `appsettings.json`:
+   ```json
+   {
+     "ConnectionStrings": {
+       "DefaultConnection": "Server=localhost;Database=andy_agentic;Uid=your_username;Pwd=your_password;"
+     }
+   }
+   ```
 
 ### Running the Application
 
@@ -54,11 +79,25 @@ cd andy-agentic
 # Restore dependencies
 dotnet restore
 
+# Build the solution
+dotnet build
+
 # Run the application
 dotnet run --project src/Andy.Agentic
 ```
 
-The application will start on `http://localhost:5030`. Navigate to this URL in your browser to access the web interface.
+The application will start on `http://localhost:80` (HTTP) and `https://localhost:443` (HTTPS). Navigate to this URL in your browser to access the web interface.
+
+### Configuration
+
+The application uses a clean architecture with organized configuration in `Startup.cs`:
+
+- **Web Services**: Controllers, Swagger, CORS
+- **Database**: Entity Framework Core with MySQL
+- **AutoMapper**: Object-to-object mapping
+- **Repositories**: Data access layer
+- **Services**: Business logic layer
+- **HTTP Clients**: External API integration
 
 ### Running Tests
 
@@ -75,25 +114,76 @@ dotnet test --collect:"XPlat Code Coverage"
 ```
 andy-agentic/
 ├── src/
-│   └── Andy.Agentic/           # Main ASP.NET Core application
-│       ├── Controllers/        # API controllers
-│       ├── Models/            # Data models
-│       ├── Services/          # Business logic
-│       └── Program.cs         # Application entry point
-├── tests/
-│   └── Andy.Agentic.Tests/    # Unit and integration tests
-├── docs/                       # Documentation
-└── examples/                   # Example configurations and workflows
+│   ├── Andy.Agentic/                    # Main ASP.NET Core application
+│   │   ├── Controllers/                 # API controllers
+│   │   │   ├── AgentsController.cs      # Agent management
+│   │   │   ├── ChatController.cs        # Chat and streaming
+│   │   │   ├── LLMController.cs         # LLM provider management
+│   │   │   ├── TagsController.cs        # Tag management
+│   │   │   ├── ToolsController.cs       # Tool management
+│   │   │   └── ToolExecutionController.cs # Tool execution
+│   │   ├── Program.cs                   # Application entry point
+│   │   ├── Startup.cs                   # Configuration and DI setup
+│   │   └── appsettings.json             # Application configuration
+│   ├── Andy.Agentic.Application/        # Application layer
+│   │   ├── DTOs/                        # Data Transfer Objects
+│   │   ├── Interfaces/                  # Service interfaces
+│   │   ├── Mapping/                     # AutoMapper profiles
+│   │   └── Services/                    # Business logic services
+│   ├── Andy.Agentic.Domain/             # Domain layer
+│   │   ├── Entities/                    # Domain entities
+│   │   ├── Interfaces/                  # Repository interfaces
+│   │   ├── Models/                      # Domain models
+│   │   └── ValueObjects/                # Domain value objects
+│   └── Andy.Agentic.Infrastructure/     # Infrastructure layer
+│       ├── Data/                        # Database context
+│       ├── Repositories/                # Repository implementations
+│       └── Services/                    # Infrastructure services
+├── tests/                               # Test projects
+│   ├── Andy.Agentic.Tests/              # Main test project
+│   ├── Andy.Agentic.Application.Tests/  # Application layer tests
+│   ├── Andy.Agentic.Domain.Tests/       # Domain layer tests
+│   └── Andy.Agentic.Infrastructure.Tests/ # Infrastructure tests
+├── docs/                                # Documentation
+└── examples/                            # Example configurations
 ```
-
-## Configuration
-
-[Configuration documentation will be added as the project develops]
 
 ## API Documentation
 
 When running in development mode, Swagger documentation is available at:
-- `http://localhost:5030/swagger`
+- `http://localhost/swagger` (HTTP)
+- `https://localhost/swagger` (HTTPS)
+
+### Available Endpoints
+
+#### Agents
+- `GET /api/agents` - List all agents
+- `GET /api/agents/{id}` - Get agent by ID
+- `POST /api/agents` - Create new agent
+- `PUT /api/agents/{id}` - Update agent
+- `DELETE /api/agents/{id}` - Delete agent
+
+#### Chat
+- `POST /api/chat/stream` - Stream chat messages (SSE)
+- `GET /api/chat/history/{agentId}` - Get chat history
+- `GET /api/chat/sessions` - List chat sessions
+- `POST /api/chat/sessions` - Create new session
+
+#### Tags
+- `GET /api/tags` - List all tags
+- `POST /api/tags` - Create new tag
+- `PUT /api/tags/{id}` - Update tag
+- `DELETE /api/tags/{id}` - Delete tag
+- `GET /api/tags/search` - Search tags
+
+#### Tools
+- `GET /api/tools` - List all tools
+- `POST /api/tools` - Create new tool
+- `POST /api/tools/execute` - Execute tool
+
+#### LLM Providers
+- `GET /api/llm/providers` - List available providers
+- `POST /api/llm/test-connection` - Test LLM connection
 
 ## Contributing
 
@@ -119,16 +209,63 @@ This is an alpha release. Community support is available through:
 - GitHub Issues for bug reports and feature requests
 - Discussions for general questions and ideas
 
-## Roadmap
+## Architecture
 
-- [ ] Core agent orchestration engine
-- [ ] LLM provider integrations
-- [ ] MCP server support
-- [ ] Web UI implementation
-- [ ] Authentication and authorization
-- [ ] Agent workflow designer
-- [ ] Performance monitoring dashboard
-- [ ] Plugin marketplace
+Andy Agentic follows **Clean Architecture** principles with clear separation of concerns:
+
+### Domain Layer (`Andy.Agentic.Domain`)
+- **Entities**: Core business objects (Agent, Tool, Tag, etc.)
+- **Interfaces**: Repository and service contracts
+- **Models**: Domain models for business logic
+- **Value Objects**: Immutable objects representing domain concepts
+
+### Application Layer (`Andy.Agentic.Application`)
+- **DTOs**: Data Transfer Objects for API communication
+- **Services**: Business logic and orchestration
+- **Interfaces**: Service contracts
+- **Mapping**: AutoMapper profiles for object mapping
+
+### Infrastructure Layer (`Andy.Agentic.Infrastructure`)
+- **Data**: Entity Framework Core database context
+- **Repositories**: Data access implementations
+- **Services**: External service integrations (LLM providers, APIs)
+
+### Presentation Layer (`Andy.Agentic`)
+- **Controllers**: REST API endpoints
+- **Startup**: Dependency injection and configuration
+- **Program**: Application entry point
+
+## Features Implemented
+
+### ✅ Core Features
+- [x] **Agent Management**: Create, read, update, delete agents
+- [x] **LLM Integration**: OpenAI and Ollama provider support
+- [x] **Tool System**: Dynamic tool creation and execution
+- [x] **Chat System**: Real-time streaming with SSE
+- [x] **Session Management**: Persistent chat sessions
+- [x] **Tag System**: Organize agents with tags
+- [x] **MCP Server Support**: Model Context Protocol integration
+- [x] **Clean Architecture**: Domain-driven design implementation
+- [x] **AutoMapper**: Object-to-object mapping
+- [x] **Repository Pattern**: Data access abstraction
+- [x] **Unit of Work**: Transaction management
+- [x] **Comprehensive Testing**: xUnit test framework
+
+### 🔄 In Progress
+- [ ] **Authentication & Authorization**: User management and security
+- [ ] **Web UI**: Frontend interface implementation
+- [ ] **Performance Monitoring**: Metrics and analytics
+- [ ] **Plugin System**: Extensible architecture
+
+### 📋 Roadmap
+- [ ] **Agent Workflow Designer**: Visual workflow creation
+- [ ] **Multi-Agent Orchestration**: Complex agent interactions
+- [ ] **Plugin Marketplace**: Third-party integrations
+- [ ] **Advanced Analytics**: Usage patterns and insights
+- [ ] **API Rate Limiting**: Request throttling and management
+- [ ] **Caching Layer**: Performance optimization
+- [ ] **Message Queuing**: Asynchronous processing
+- [ ] **Webhook Support**: Event-driven integrations
 
 ## Disclaimer
 
