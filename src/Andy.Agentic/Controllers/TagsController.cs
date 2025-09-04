@@ -20,7 +20,7 @@ public class TagsController : ControllerBase
     ///     Initializes a new instance of the TagsController.
     /// </summary>
     /// <param name="tagService">The tag service for business logic operations.</param>
-    /// <param name="mapper"></param>
+    /// <param name="mapper">The AutoMapper instance for object mapping.</param>
     public TagsController(ITagService tagService,
         IMapper mapper)
     {
@@ -43,7 +43,7 @@ public class TagsController : ControllerBase
         }
         catch (Exception ex)
         {
-            return StatusCode(500, $"Internal server error: {ex.Message}");
+            return StatusCode(500, new { error = "Internal server error", message = ex.Message });
         }
     }
 
@@ -61,14 +61,14 @@ public class TagsController : ControllerBase
             var tag = await _tagService.GetTagByIdAsync(id);
             if (tag == null)
             {
-                return NotFound($"Tag with ID {id} not found");
+                return NotFound(new { error = "Tag not found" });
             }
 
             return Ok(_mapper.Map<TagDto>(tag));
         }
         catch (Exception ex)
         {
-            return StatusCode(500, $"Internal server error: {ex.Message}");
+            return StatusCode(500, new { error = "Internal server error", message = ex.Message });
         }
     }
 
@@ -88,15 +88,15 @@ public class TagsController : ControllerBase
         }
         catch (ArgumentException ex)
         {
-            return BadRequest(ex.Message);
+            return BadRequest(new { error = "Invalid request", message = ex.Message });
         }
         catch (InvalidOperationException ex)
         {
-            return Conflict(ex.Message);
+            return Conflict(new { error = "Operation failed", message = ex.Message });
         }
         catch (Exception ex)
         {
-            return StatusCode(500, $"Internal server error: {ex.Message}");
+            return StatusCode(500, new { error = "Internal server error", message = ex.Message });
         }
     }
 
@@ -130,7 +130,7 @@ public class TagsController : ControllerBase
         }
         catch (Exception ex)
         {
-            return StatusCode(500, $"Internal server error: {ex.Message}");
+            return StatusCode(500, new { error = "Internal server error", message = ex.Message });
         }
     }
 
@@ -159,7 +159,7 @@ public class TagsController : ControllerBase
         }
         catch (Exception ex)
         {
-            return StatusCode(500, $"Internal server error: {ex.Message}");
+            return StatusCode(500, new { error = "Internal server error", message = ex.Message });
         }
     }
 
@@ -179,7 +179,7 @@ public class TagsController : ControllerBase
         }
         catch (Exception ex)
         {
-            return StatusCode(500, $"Internal server error: {ex.Message}");
+            return StatusCode(500, new { error = "Internal server error", message = ex.Message });
         }
     }
 }

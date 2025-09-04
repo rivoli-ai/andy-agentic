@@ -42,18 +42,75 @@ Andy Agentic provides a unified web-based interface for orchestrating AI agents 
 - **Mapping**: AutoMapper for object-to-object mapping
 - **Testing**: xUnit with code coverage
 - **Platform**: Cross-platform (.NET 9)
+- **Containerization**: Docker & Docker Compose
 - **LLM Integration**: OpenAI API, Ollama local models
 - **Real-time**: Server-Sent Events (SSE) for streaming
 
 ## Prerequisites
 
+### Option 1: Docker (Recommended)
+- Docker Desktop or Docker Engine
+- Docker Compose
+
+### Option 2: Local Development
 - .NET 9.0 SDK or later
 - MySQL Server 8.0 or later
 - A modern web browser
 
 ## Getting Started
 
-### Database Setup
+### Option 1: Docker (Recommended)
+
+The easiest way to run Andy Agentic is using Docker Compose, which will set up both the application and MySQL database automatically.
+
+```bash
+# Clone the repository
+git clone https://github.com/rivoli-ai/andy-agentic.git
+cd andy-agentic
+
+# Start the application with Docker Compose (builds automatically)
+docker-compose up -d
+
+# View logs
+docker-compose logs -f app
+
+# Stop the application
+docker-compose down
+```
+
+The application will be available at:
+- **HTTP**: `http://localhost`
+- **HTTPS**: `https://localhost` (if SSL is configured)
+- **API Documentation**: `http://localhost/swagger`
+
+#### Docker Commands
+
+```bash
+# Start services in background
+docker-compose up -d
+
+# View logs
+docker-compose logs -f
+
+# Stop services
+docker-compose down
+
+# Stop and remove volumes (WARNING: This will delete all data)
+docker-compose down -v
+
+# Rebuild and restart services
+docker-compose up --build --force-recreate -d
+
+# Build only (without starting)
+docker-compose build
+
+# View running containers
+docker-compose ps
+```
+
+### Option 2: Local Development
+
+#### Database Setup
 
 1. **Install MySQL Server** (8.0 or later)
 2. **Create a database** for the application:
@@ -69,7 +126,7 @@ Andy Agentic provides a unified web-based interface for orchestrating AI agents 
    }
    ```
 
-### Running the Application
+#### Running the Application
 
 ```bash
 # Clone the repository
@@ -124,7 +181,8 @@ andy-agentic/
 │   │   │   └── ToolExecutionController.cs # Tool execution
 │   │   ├── Program.cs                   # Application entry point
 │   │   ├── Startup.cs                   # Configuration and DI setup
-│   │   └── appsettings.json             # Application configuration
+│   │   ├── appsettings.json             # Application configuration
+│   │   └── appsettings.Docker.json      # Docker-specific configuration
 │   ├── Andy.Agentic.Application/        # Application layer
 │   │   ├── DTOs/                        # Data Transfer Objects
 │   │   ├── Interfaces/                  # Service interfaces
@@ -145,7 +203,92 @@ andy-agentic/
 │   ├── Andy.Agentic.Domain.Tests/       # Domain layer tests
 │   └── Andy.Agentic.Infrastructure.Tests/ # Infrastructure tests
 ├── docs/                                # Documentation
-└── examples/                            # Example configurations
+├── examples/                            # Example configurations
+├── Dockerfile                           # Docker container definition
+├── docker-compose.yml                   # Docker Compose configuration
+├── .dockerignore                        # Docker build context exclusions
+└── shop_schema.sql                      # Database schema
+```
+
+## Docker Configuration
+
+### Docker Services
+
+The `docker-compose.yml` file defines two main services:
+
+#### MySQL Database (`mysql`)
+- **Image**: `mysql:8.0`
+- **Port**: `3306` (mapped to host)
+- **Database**: `andy_agentic`
+- **Credentials**: 
+  - Root: `root` / `rootpassword`
+  - User: `andy_user` / `andy_password`
+- **Data Persistence**: Named volume `mysql_data`
+- **Health Check**: Automatic MySQL connectivity verification
+
+#### Andy Agentic Application (`app`)
+- **Build**: Multi-stage Docker build from source
+- **Ports**: `80` (HTTP) and `443` (HTTPS)
+- **Environment**: Production mode
+- **Dependencies**: Waits for MySQL to be healthy
+- **Logs**: Persistent volume `app_logs`
+
+### Docker Environment Variables
+
+The application uses the following environment variables in Docker:
+
+```bash
+ASPNETCORE_ENVIRONMENT=Production
+ASPNETCORE_URLS=http://+:80
+ConnectionStrings__DefaultConnection=Server=mysql;Database=andy_agentic;User=andy_user;Password=andy_password;Port=3306
+```
+
+### Docker Volumes
+
+- **`mysql_data`**: Persistent MySQL database storage
+- **`app_logs`**: Application log files
+
+### Docker Network
+
+All services run on the `andy-agentic-network` bridge network for secure internal communication.
+
+### Troubleshooting Docker Issues
+
+#### Build Issues
+If you encounter build errors, try these steps:
+
+```bash
+# Clean build (removes cached layers)
+docker-compose build --no-cache
+
+# Force rebuild and restart
+docker-compose up --build --force-recreate -d
+
+# Check build logs
+docker-compose logs app
+```
+
+#### Docker Desktop Not Running
+If you get connection errors, ensure Docker Desktop is running:
+
+```bash
+# Check Docker status
+docker version
+
+# Start Docker Desktop if needed (Windows/Mac)
+# Or restart Docker service (Linux)
+sudo systemctl restart docker
+```
+
+#### Port Already in Use
+If ports 80 or 3306 are already in use:
+
+```bash
+# Check what's using the ports
+netstat -tulpn | grep :80
+netstat -tulpn | grep :3306
+
+# Stop conflicting services or modify docker-compose.yml ports
 ```
 
 ## API Documentation
