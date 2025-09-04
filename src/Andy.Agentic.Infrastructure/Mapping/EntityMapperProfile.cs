@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Andy.Agentic.Domain.Entities;
 using Andy.Agentic.Domain.Models;
 using AutoMapper;
@@ -49,7 +50,10 @@ public class EntityMapperProfile : Profile
             .ReverseMap();
 
         CreateMap<ToolExecutionLogEntity, ToolExecutionLog>()
-            .ReverseMap();
+            .ForMember(dest => dest.Parameters, opt => opt.MapFrom(src => DeserializeParameters(src.Parameters)));
+
+        CreateMap<ToolExecutionLog,ToolExecutionLogEntity>()
+            .ForMember(dest => dest.Parameters, opt => opt.MapFrom(src => SerializeParameters(src.Parameters)));
 
         CreateMap<AgentTagEntity, AgentTag>()
             .ReverseMap();
@@ -92,5 +96,32 @@ public class EntityMapperProfile : Profile
             .ForMember(dest => dest.Description, opt => opt.Ignore()) // Will be set manually
             .ForMember(dest => dest.RecentMessages, opt => opt.Ignore()) // Will be set manually
             .ForMember(dest => dest.IsActive, opt => opt.Ignore()); // Will be set manually
+    }
+
+    private static string SerializeParameters(Dictionary<string, object> parameters)
+    {
+        try
+        {
+            return JsonSerializer.Serialize(parameters);
+        }
+        catch
+        {
+            return "{}";
+        }
+    }
+
+    private static Dictionary<string, object> DeserializeParameters(string? parameters)
+    {
+        if (string.IsNullOrEmpty(parameters))
+            return new Dictionary<string, object>();
+
+        try
+        {
+            return JsonSerializer.Deserialize<Dictionary<string, object>>(parameters) ?? new Dictionary<string, object>();
+        }
+        catch
+        {
+            return new Dictionary<string, object>();
+        }
     }
 }

@@ -259,9 +259,9 @@ public class LlmService(ILlmRepository llmRepository, ILlmProviderFactory provid
     /// <param name="tools">Optional list of tools available to the LLM.</param>
     /// <param name="toolCalls">Optional list of previous tool calls for context.</param>
     /// <returns>An async enumerable of response chunks from the LLM provider.</returns>
-    public async IAsyncEnumerable<string> SendToLlmProviderStreamAsync(
+    public async IAsyncEnumerable<StreamingResult> SendToLlmProviderStreamAsync(
         LlmConfig llmConfig,
-        string message,
+        string? message,
         List<OpenAiTool>? tools = null,
         List<ToolCall>? toolCalls = null)
     {
@@ -269,9 +269,10 @@ public class LlmService(ILlmRepository llmRepository, ILlmProviderFactory provid
 
         var config = mapper.Map<LlmConfig>(llmConfig);
 
-        await foreach (var chunk in provider.SendMessageStreamAsync(config, message, tools, toolCalls))
+      
+        await foreach (var chunk in provider.StreamChatWithTools(config, message, tools))
         {
-            yield return chunk;
+            yield return chunk!;
         }
     }
 
@@ -444,26 +445,22 @@ public class LlmService(ILlmRepository llmRepository, ILlmProviderFactory provid
     public void ParseAndAdolParameters(AgentTool tool, OpenAiTool toolFunction)
     {
         if (string.IsNullOrEmpty(tool.Tool.Parameters))
-        {
             return;
-        }
 
         try
         {
-            var parameters = JsonSerializer.Deserialize<List<dynamic>>(tool.Tool.Parameters);
-            if (parameters == null)
-            {
+            var array = JsonSerializer.Deserialize<JsonElement[]>(tool.Tool.Parameters);
+            if (array == null)
                 return;
-            }
 
             var requiredParams = new List<string>();
 
-            foreach (var param in parameters)
+            foreach (var param in array)
             {
                 var paramName = param.GetProperty("name").GetString();
                 var paramType = param.GetProperty("type").GetString();
-                var paramDescription = param.GetProperty("description")?.GetString() ?? "";
-                var paramRequired = param.GetProperty("required")?.GetBoolean() ?? false;
+                var paramDescription = param.TryGetProperty("description", out var desc) ? desc.GetString() ?? "" : "";
+                var paramRequired = param.TryGetProperty("required", out var req) && req.GetBoolean();
 
                 if (paramName == null || paramType == null)
                 {
@@ -472,7 +469,8 @@ public class LlmService(ILlmRepository llmRepository, ILlmProviderFactory provid
 
                 toolFunction.Function.Parameters.Properties[paramName] = new FunctionProperty
                 {
-                    Type = MapParameterType(paramType), Description = paramDescription
+                    Type = MapParameterType(paramType),
+                    Description = paramDescription
                 };
 
                 if (paramRequired)

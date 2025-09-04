@@ -19,6 +19,6 @@ public interface ILlmService
 
     string BuildConversationContext(IList<ChatHistory> recentMessages);
 
-    IAsyncEnumerable<string> SendToLlmProviderStreamAsync(LlmConfig llmConfig, string message,
+    IAsyncEnumerable<StreamingResult> SendToLlmProviderStreamAsync(LlmConfig llmConfig, string message,
         List<OpenAiTool>? tools = null, List<ToolCall>? toolCalls = null);
 }

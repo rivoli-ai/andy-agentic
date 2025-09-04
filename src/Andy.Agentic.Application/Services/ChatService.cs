@@ -71,13 +71,18 @@ public class ChatService(
             recentMessages.ToList()
         );
         var toolCalls = new List<ToolCall>();
-        var responseContent = new List<string>();
+        var responseContent = new List<string?>();
+        var toolsToCall = new List<ToolCall?>();
 
         await foreach (var chunk in llmResourceAccess.SendToLlmProviderStreamAsync(agent.LlmConfig, llmMessage, tools,
                            toolCalls))
         {
-            responseContent.Add(chunk);
-            yield return chunk;
+            responseContent.Add(chunk.Content);
+            if (chunk.ToolCalls != null)
+            {
+                toolsToCall.AddRange(chunk.ToolCalls);
+            }
+            yield return chunk.Content;
         }
 
         if (responseContent.Any())
@@ -93,12 +98,12 @@ public class ChatService(
             });
         }
 
-        if (!toolCalls.Any())
+        if (!toolsToCall.Any())
         {
             yield break;
         }
 
-        var toolResults = await toolExecutionService.ExecuteToolCallsAsync(toolCalls, agent, sessionId);
+        var toolResults = await toolExecutionService.ExecuteToolCallsAsync(toolsToCall, agent, sessionId);
         var followUpMessage = toolExecutionService.CreateFollowUpMessage(llmMessage, toolResults);
 
         await foreach (var chunk in SendMessageStreamRecursiveAsync(agent, activePrompt, followUpMessage, sessionId))

@@ -1,6 +1,7 @@
 using Andy.Agentic.Application.Interfaces;
 using Andy.Agentic.Application.Mapping;
 using Andy.Agentic.Application.Services;
+using Andy.Agentic.Domain.Interfaces;
 using Andy.Agentic.Domain.Interfaces.Database;
 using Andy.Agentic.Domain.Interfaces.Llm;
 using Andy.Agentic.Infrastructure.Data;
@@ -8,6 +9,7 @@ using Andy.Agentic.Infrastructure.Mapping;
 using Andy.Agentic.Infrastructure.Repositories.Database;
 using Andy.Agentic.Infrastructure.Repositories.Llm;
 using Andy.Agentic.Infrastructure.Services;
+using Andy.Agentic.Infrastructure.Services.ToolProviders;
 using Andy.Agentic.Infrastructure.UnitOfWorks;
 using Andy.ResourceAccess.DataBase;
 using Microsoft.EntityFrameworkCore;
@@ -45,6 +47,7 @@ public class Startup
         ConfigureRepositories(services);
         ConfigureCoreServices(services);
         ConfigureHttpClient(services);
+        ConfigureToolProviders(services);
     }
 
     /// <summary>
@@ -146,6 +149,16 @@ public class Startup
     /// </summary>
     /// <param name="services">The service collection to configure.</param>
     private void ConfigureHttpClient(IServiceCollection services) => services.AddHttpClient();
+
+    /// <summary>
+    ///     Configures tool provider services.
+    /// </summary>
+    /// <param name="services">The service collection to configure.</param>
+    private void ConfigureToolProviders(IServiceCollection services)
+    {
+        services.AddScoped<IToolProvider, ApiToolProvider>();
+        services.AddScoped<IToolProvider, McpToolProvider>();
+    }
 
     /// <summary>
     ///     Configures the development environment settings.

@@ -21,6 +21,8 @@ public class OllamaRepository(HttpClient httpClient) : ILLmProviderRepository
 
     public string ProviderName => "ollama";
 
+    public IAsyncEnumerable<StreamingResult> StreamChatWithTools(LlmConfig config, string message, List<OpenAiTool> tools) => throw new NotImplementedException();
+
     public bool CanHandleProvider(string provider)
     {
         return provider.Equals("ollama", StringComparison.OrdinalIgnoreCase);

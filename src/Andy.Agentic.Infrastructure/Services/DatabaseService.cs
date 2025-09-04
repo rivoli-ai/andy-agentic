@@ -33,72 +33,8 @@ public class DatabaseService(
     public async Task<Agent> CreateAgentAsync(Agent createAgent)
     {
         var agent = mapper.Map<AgentEntity>(createAgent);
-        agent.Id = Guid.NewGuid();
         agent.CreatedAt = DateTime.UtcNow;
         agent.UpdatedAt = DateTime.UtcNow;
-
-        agent.LlmConfigId = createAgent.LlmConfigId;
-
-        foreach (var prompt in createAgent.Prompts)
-        {
-            var promptEntity = new PromptEntity
-            {
-                Id = Guid.NewGuid(),
-                Content = prompt.Content,
-                IsActive = prompt.IsActive,
-                AgentId = agent.Id,
-                CreatedAt = DateTime.UtcNow,
-                UpdatedAt = DateTime.UtcNow
-            };
-
-            foreach (var variable in prompt.Variables)
-            {
-                var variableEntity = new PromptVariableEntity
-                {
-                    Id = Guid.NewGuid(),
-                    Name = variable.Name,
-                    Type = variable.Type,
-                    Required = variable.Required,
-                    DefaultValue = variable.DefaultValue,
-                    Description = variable.Description,
-                    PromptId = prompt.Id
-                };
-                prompt.Variables.Add(variable);
-            }
-
-            agent.Prompts.Add(promptEntity);
-        }
-
-        foreach (var tool in createAgent.Tools)
-        {
-            var toolEntity = new AgentToolEntity
-            {
-                IsActive = tool.IsActive,
-                ToolId = tool.ToolId!,
-                AgentId = agent.Id
-            };
-            agent.Tools.Add(toolEntity);
-        }
-
-        foreach (var mcpServer in createAgent.McpServers)
-        {
-            var mcpServerEntity = new AgentMcpServerEntity
-            {
-                Id = Guid.NewGuid(),
-                Name = mcpServer.Name,
-                IsActive = mcpServer.IsActive,
-                Capabilities = mcpServer.Capabilities,
-                AgentId = agent.Id
-            };
-            agent.McpServers.Add(mcpServerEntity);
-        }
-
-        foreach (var tagName in createAgent.AgentTags)
-        {
-            var tag = await tagRepository.GetOrCreateTagAsync(tagName.Tag.Name);
-            var agentTag = new AgentTagEntity { Id = Guid.NewGuid(), AgentId = agent.Id, Tag = tag };
-            agent.AgentTags.Add(agentTag);
-        }
 
         var createdAgent = await agentRepository.CreateAsync(agent);
         return mapper.Map<Agent>(createdAgent);

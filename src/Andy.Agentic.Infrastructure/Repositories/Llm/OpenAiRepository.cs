@@ -1,8 +1,12 @@
+using System.ClientModel;
 using System.Text;
 using System.Text.Encodings.Web;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using Andy.Agentic.Domain.Interfaces.Llm;
 using Andy.Agentic.Domain.Models;
+using OpenAI;
+using OpenAI.Chat;
 
 namespace Andy.Agentic.Infrastructure.Repositories.Llm;
 
@@ -31,6 +35,103 @@ public class OpenAiRepository : ILLmProviderRepository
     {
         return provider.Equals("openai", StringComparison.OrdinalIgnoreCase);
     }
+
+    public async IAsyncEnumerable<StreamingResult> StreamChatWithTools(
+        LlmConfig config,
+        string message,
+        List<OpenAiTool> tools)
+    {
+        var client = CreateClient(config);
+        var chatClient = client.GetChatClient(config.Model);
+        var options = CreateChatOptions(config, tools);
+
+        var messages = new List<OpenAI.Chat.ChatMessage> { new OpenAI.Chat.UserChatMessage(message) };
+        var streamingResult = chatClient.CompleteChatStreamingAsync(messages, options);
+
+        var toolCalls = new List<StreamingChatToolCallUpdate>();
+        var assistantMessage = "";
+
+        await foreach (var update in streamingResult)
+        {
+            foreach (var contentPart in update.ContentUpdate)
+            {
+
+                assistantMessage += contentPart.Text;
+                yield return new StreamingResult { Content = contentPart.Text };
+            }
+
+            foreach (var toolCallUpdate in update.ToolCallUpdates)
+            {
+                var existingToolCall = toolCalls.FirstOrDefault(tc => tc.Index == toolCallUpdate.Index);
+                if (existingToolCall == null)
+                {
+                    toolCalls.Add(toolCallUpdate);
+                }
+            }
+
+
+        }
+
+        if (toolCalls.Any())
+        {
+            var toolCallRequests = toolCalls.Select(tc => new ToolCall
+            {
+                Id = tc.ToolCallId,
+                Function = new ToolCallFunction{ Name = tc.FunctionName ?? "" , Arguments = tc.FunctionArgumentsUpdate?.ToString() ?? "" },
+            }).ToList();
+
+            yield return new StreamingResult
+            {
+                ToolCalls = toolCallRequests,
+                AssistantMessage = assistantMessage,
+                Messages = messages.Select(m => m.Content?.ToString() ).ToList()
+            };
+        }
+    }
+
+
+
+    private OpenAIClient CreateClient(LlmConfig config)
+    {
+        var clientOptions = new OpenAIClientOptions
+        {
+            Endpoint = new Uri(config.BaseUrl)
+        };
+
+        return new OpenAIClient(new ApiKeyCredential(config.ApiKey), clientOptions);
+    }
+
+    private ChatCompletionOptions CreateChatOptions(LlmConfig config, List<OpenAiTool> tools)
+    {
+        var options = new ChatCompletionOptions
+        {
+            Temperature = (float?)config.Temperature,
+            TopP = (float?)config.TopP,
+            FrequencyPenalty = (float?)config.FrequencyPenalty,
+            PresencePenalty = (float?)config.PresencePenalty
+        };
+
+        JsonSerializerOptions JsonOptions = new()
+        {
+            PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+            DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
+        };
+
+        foreach (var tool in tools)
+        {
+            var chatTool = ChatTool.CreateFunctionTool(
+                tool.Function.Name,
+                tool.Function.Description,
+                    BinaryData.FromObjectAsJson(tool.Function.Parameters, JsonOptions)
+            );
+
+            options.Tools.Add(chatTool);
+        }
+
+        return options;
+    }
+
+
 
     public async IAsyncEnumerable<string> SendMessageStreamAsync(
         LlmConfig llmConfig,

@@ -72,7 +72,5 @@ public class ToolExecutionLog
     ///     Gets or sets the execution time in milliseconds.
     /// </summary>
     public double ExecutionTime { get; set; }
-
-    public Dictionary<string, object>? UsedParameters { get; set; }
 }
 

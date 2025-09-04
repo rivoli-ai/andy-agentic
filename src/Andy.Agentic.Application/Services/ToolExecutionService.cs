@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Text.Json;
 using Andy.Agentic.Application.Interfaces;
+using Andy.Agentic.Domain.Interfaces;
 using Andy.Agentic.Domain.Interfaces.Database;
 using Andy.Agentic.Domain.Models;
 
@@ -13,7 +14,7 @@ namespace Andy.Agentic.Application.Services;
 public class ToolExecutionService(
     IDataBaseService databaseResourceAccess,
     IToolService toolEngine,
-    IHttpClientFactory httpClientFactory)
+    IEnumerable<IToolProvider> toolProviders)
     : IToolExecutionService
 {
     /// <summary>
@@ -83,23 +84,19 @@ public class ToolExecutionService(
         try
         {
             var tool = await toolEngine.GetToolByIdAsync(request.ToolId);
-            if (tool == null)
+            if(tool == null)
             {
-                return new ToolExecutionLog
-                {
-                    Success = false,
-                    ErrorMessage = $"Tool with ID {request.ToolId} not found",
-                    ToolName = request.ToolName,
-                    UsedParameters = request.Parameters
-                };
+                throw new KeyNotFoundException($"the tool {request.ToolId} not found");
             }
 
-            var result = tool.Type.ToLower() switch
+           
+            var provider = toolProviders.FirstOrDefault(p => p.CanHandleToolType(tool.Type));
+            if (provider == null)
             {
-                "api" => await ExecuteApiToolAsync(tool, request.Parameters),
-                "mcp" => throw new NotImplementedException(),
-                _ => throw new ArgumentOutOfRangeException()
-            };
+                throw new NotSupportedException($"No provider found for tool type: {tool.Type}");
+            }
+
+            var result = await provider.ExecuteToolAsync(tool, request.Parameters);
 
             stopwatch.Stop();
 
@@ -110,7 +107,7 @@ public class ToolExecutionService(
                 Success = true,
                 Result = result,
                 ToolName = tool.Name,
-                UsedParameters = request.Parameters,
+                Parameters = request.Parameters,
                 ExecutionTime = stopwatch.ElapsedMilliseconds
             };
         }
@@ -125,7 +122,7 @@ public class ToolExecutionService(
                 Success = false,
                 ErrorMessage = ex.Message,
                 ToolName = request.ToolName,
-                UsedParameters = request.Parameters,
+                Parameters = request.Parameters,
                 ExecutionTime = stopwatch.ElapsedMilliseconds
             };
         }
@@ -281,30 +278,7 @@ public class ToolExecutionService(
     }
 
 
-    /// <summary>
-    ///     Executes an API-type tool using HTTP client factory.
-    ///     This is a simplified implementation for demonstration purposes.
-    /// </summary>
-    /// <param name="tool">The tool configuration containing API details.</param>
-    /// <param name="parameters">The parameters to pass to the API tool.</param>
-    /// <returns>The result of the API tool execution.</returns>
     // Private helper methods
-    private async Task<object?> ExecuteApiToolAsync(Tool tool, Dictionary<string, object> parameters)
-    {
-        var httpClient = httpClientFactory.CreateClient();
-
-        // Parse configuration and authentication from tool
-        var configuration = tool.Configuration != null
-            ? JsonSerializer.Deserialize<Dictionary<string, object>>(tool.Configuration)
-            : null;
-        var auth = tool.Authentication != null
-            ? JsonSerializer.Deserialize<Dictionary<string, object>>(tool.Authentication)
-            : null;
-
-        // This is a simplified implementation
-        // In a real scenario, you would implement the actual API call logic here
-        return "API tool executed successfully";
-    }
 
     /// <summary>
     ///     Logs a tool execution result to the database for audit and analysis purposes.

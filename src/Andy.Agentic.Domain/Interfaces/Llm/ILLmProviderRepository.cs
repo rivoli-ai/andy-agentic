@@ -12,6 +12,7 @@ public interface ILLmProviderRepository
     /// </summary>
     string ProviderName { get; }
 
+ 
     /// <summary>
     ///     Sends a message to the LLM provider and returns a streaming response
     /// </summary>
@@ -25,6 +26,11 @@ public interface ILLmProviderRepository
         string message,
         List<OpenAiTool>? tools = null,
         List<ToolCall>? toolCalls = null);
+
+     IAsyncEnumerable<StreamingResult> StreamChatWithTools(
+        LlmConfig config,
+        string message,
+        List<OpenAiTool> tools);
 
     /// <summary>
     ///     Checks if this repository can handle the given provider
