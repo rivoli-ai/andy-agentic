@@ -1,3 +1,5 @@
+using Andy.Agentic.Domain.Models;
+
 public class ChatHistory
 {
     public Guid Id { get; set; }
@@ -11,4 +13,6 @@ public class ChatHistory
     public bool IsToolExecution { get; set; }
     public string? ToolName { get; set; }
     public string? ToolResult { get; set; }
+
+    public List<ToolExecutionLog> ToolResults { get; set; } = new();
 }

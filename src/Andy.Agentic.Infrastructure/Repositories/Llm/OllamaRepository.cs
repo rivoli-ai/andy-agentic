@@ -21,7 +21,8 @@ public class OllamaRepository(HttpClient httpClient) : ILLmProviderRepository
 
     public string ProviderName => "ollama";
 
-    public IAsyncEnumerable<StreamingResult> StreamChatWithTools(LlmConfig config, string message, List<OpenAiTool> tools) => throw new NotImplementedException();
+    public IAsyncEnumerable<StreamingResult> StreamChatWithTools(LlmConfig config, List<ChatHistory> message,
+        List<OpenAiTool> tools) => throw new NotImplementedException();
 
     public bool CanHandleProvider(string provider)
     {
@@ -102,11 +103,7 @@ public class OllamaRepository(HttpClient httpClient) : ILLmProviderRepository
         return new StringContent(json, Encoding.UTF8, "application/json");
     }
 
-    private void ConfigureHttpClientHeaders(LlmConfig llmConfig)
-    {
-        httpClient.DefaultRequestHeaders.Clear();
-        // Ollama doesn't require API keys, so no authorization header needed
-    }
+    private void ConfigureHttpClientHeaders(LlmConfig llmConfig) => httpClient.DefaultRequestHeaders.Clear();
 
     private static async IAsyncEnumerable<string> ProcessOllamaStreamingResponseAsync(HttpResponseMessage response)
     {

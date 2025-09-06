@@ -52,6 +52,7 @@ namespace Andy.Agentic.Infrastructure.Repositories.Database
             // Check if tool is being used by any agents
             var isUsedByAgents = await context.AgentTools
                 .Include(x=>x.Agent)
+                .Where(x=>x.ToolId == tool.Id)
                 .AnyAsync(x=>x.Agent.IsActive);
 
             if (isUsedByAgents)

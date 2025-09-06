@@ -70,7 +70,6 @@ public class Startup
         services.AddControllers();
         services.AddEndpointsApiExplorer();
         services.AddSwaggerGen();
-
         services.AddCors(options =>
         {
             options.AddPolicy("AllowAngularApp", policy =>
@@ -192,7 +191,7 @@ public class Startup
     {
         using var scope = app.Services.CreateScope();
         var context = scope.ServiceProvider.GetRequiredService<AndyDbContext>();
-        context.Database.EnsureCreated();
+        context.Database.Migrate();
         DatabaseSeeder.SeedData(context);
     }
 }

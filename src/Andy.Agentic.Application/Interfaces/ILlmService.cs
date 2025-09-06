@@ -14,11 +14,7 @@ public interface ILlmService
     LlmProvider? GetProviderByIdAsync(string id);
     Task<TestConnectionResult> TestConnectionAsync(TestConnection testConnectionDto);
 
-    Task<(string Message, List<OpenAiTool> Tools)> PrepareLlmMessageAsync(Agent agent, Prompt prompt,
-        string userMessage, string sessionId, IList<ChatHistory> getChatHistoryFunc);
-
-    string BuildConversationContext(IList<ChatHistory> recentMessages);
-
-    IAsyncEnumerable<StreamingResult> SendToLlmProviderStreamAsync(LlmConfig llmConfig, string message,
-        List<OpenAiTool>? tools = null, List<ToolCall>? toolCalls = null);
+    Task<LlmRequest> PrepareLlmMessageAsync(Agent agent, Prompt prompt,
+        string userMessage, string sessionId, List<ChatHistory> getChatHistoryFunc);
+    IAsyncEnumerable<StreamingResult> SendToLlmProviderStreamAsync(LlmConfig llmConfig, LlmRequest request);
 }

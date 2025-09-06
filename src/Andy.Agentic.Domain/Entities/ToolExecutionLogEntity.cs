@@ -19,12 +19,20 @@ public class ToolExecutionLogEntity
     [Required]
     public Guid ToolId { get; set; }
 
+
+    /// <summary>
+    ///     Identifier of the executed tool.
+    /// </summary>
+    [Required]
+    public ToolEntity Tool { get; set; }
+
     /// <summary>
     ///     Name of the executed tool.
     /// </summary>
     [Required]
     [MaxLength(100)]
     public string ToolName { get; set; } = string.Empty;
+
 
     /// <summary>
     ///     Optional identifier of the related agent.

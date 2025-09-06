@@ -24,19 +24,19 @@ public class ToolExecutionService(
     /// <param name="agent">The agent configuration containing available tools.</param>
     /// <param name="sessionId">The chat session identifier for logging.</param>
     /// <returns>A list of formatted result messages from tool executions.</returns>
-    public async Task<List<string>> ExecuteToolCallsAsync(
+    public async Task<List<ToolExecutionLog>> ExecuteToolCallsAsync(
         List<ToolCall> toolCalls,
         Agent agent,
         string sessionId)
     {
-        var toolResults = new List<string>();
+        var toolResults = new List<ToolExecutionLog>();
         var preparedExecutions = PrepareToolExecutions(toolCalls, agent);
 
         foreach (var (request, error) in preparedExecutions)
         {
             if (error != null)
             {
-                toolResults.Add($"Tool {request.ToolName}: Error - {error.ErrorMessage}");
+                toolResults.Add(error);
                 continue;
             }
 
@@ -45,15 +45,12 @@ public class ToolExecutionService(
                 request.SessionId = sessionId;
 
                 var toolResult = await ExecuteToolAsync(request);
-                var resultMessage = toolResult.Success
-                    ? $"Tool {request.ToolName}: {toolResult.Result}"
-                    : $"Tool {request.ToolName}: Error - {toolResult.ErrorMessage}";
 
-                toolResults.Add(resultMessage);
+                toolResults.Add(toolResult);
             }
             catch (Exception ex)
             {
-                toolResults.Add($"Tool {request.ToolName}: Error - {ex.Message}");
+                toolResults.Add(new ToolExecutionLog{ErrorMessage = ex.Message,Success = false});
             }
         }
 
@@ -66,10 +63,10 @@ public class ToolExecutionService(
     /// <param name="originalMessage">The original message to include in the follow-up.</param>
     /// <param name="toolResults">The list of tool execution result messages.</param>
     /// <returns>A formatted message combining the original content with tool results.</returns>
-    public string CreateFollowUpMessage(string originalMessage, List<string> toolResults)
+    public string CreateFollowUpMessage(List<string> toolResults)
     {
         var toolResultsSummary = string.Join("\n", toolResults);
-        return $"{originalMessage}\nTool execution completed. Results:\n{toolResultsSummary}.";
+        return $"Tool execution completed. Results:\n{toolResultsSummary}.";
     }
 
     /// <summary>
@@ -100,16 +97,8 @@ public class ToolExecutionService(
 
             stopwatch.Stop();
 
-            await LogExecutionAsync(request, tool, result, true, null, stopwatch.ElapsedMilliseconds);
+            return await LogExecutionAsync(request, tool, result, true, null, stopwatch.ElapsedMilliseconds);
 
-            return new ToolExecutionLog
-            {
-                Success = true,
-                Result = result,
-                ToolName = tool.Name,
-                Parameters = request.Parameters,
-                ExecutionTime = stopwatch.ElapsedMilliseconds
-            };
         }
         catch (Exception ex)
         {
@@ -289,7 +278,7 @@ public class ToolExecutionService(
     /// <param name="success">Whether the execution was successful.</param>
     /// <param name="errorMessage">Error message if execution failed.</param>
     /// <param name="executionTime">The execution time in milliseconds.</param>
-    private async Task LogExecutionAsync(
+    private async Task<ToolExecutionLog> LogExecutionAsync(
         ToolExecutionLog request,
         Tool? tool,
         object? result,

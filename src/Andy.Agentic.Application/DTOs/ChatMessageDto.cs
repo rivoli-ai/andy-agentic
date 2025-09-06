@@ -1,3 +1,4 @@
+using Andy.Agentic.Domain.Entities;
 using System.ComponentModel.DataAnnotations;
 
 namespace Andy.Agentic.Application.DTOs;
@@ -23,5 +24,13 @@ public class ChatMessageDto
     public string? ToolName { get; set; }
 
     public string? ToolResult { get; set; }
+
+    /// <summary>
+    ///     Tool Execution Results
+    /// </summary>
+
+    public List<ToolExecutionLogDto> ToolResults { get; set; } = new();
+
+
 }
 

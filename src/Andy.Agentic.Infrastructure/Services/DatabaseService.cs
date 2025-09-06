@@ -187,8 +187,10 @@ public class DatabaseService(
             ExecutionTime = executionTime
         };
 
+        return mapper.Map<ToolExecutionLog>(log);
+
         var toolLogs = await toolExecutionRepository.LogExecutionAsync(log);
-        return mapper.Map<ToolExecutionLog>(toolLogs);
+        
     }
 
     public async Task<IEnumerable<ToolExecutionLog>> GetRecentToolExecutionsAsync(Guid? agentId, string sessionId)

@@ -1,3 +1,4 @@
+using Andy.Agentic.Domain.Entities;
 using System.ComponentModel.DataAnnotations;
 
 namespace Andy.Agentic.Domain.Models;
@@ -72,5 +73,12 @@ public class ToolExecutionLog
     ///     Gets or sets the execution time in milliseconds.
     /// </summary>
     public double ExecutionTime { get; set; }
+
+    /// <summary>
+    ///     Identifier of the executed tool.
+    /// </summary>
+    [Required]
+    public Tool Tool { get; set; }
+
 }
 

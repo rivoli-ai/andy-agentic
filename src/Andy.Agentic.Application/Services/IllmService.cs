@@ -180,23 +180,27 @@ public class LlmService(ILlmRepository llmRepository, ILlmProviderFactory provid
     /// <param name="sessionId">The chat session identifier for logging.</param>
     /// <param name="recentMessages">Recent conversation history for context building.</param>
     /// <returns>A tuple containing the prepared message and available tools for the LLM.</returns>
-    public async Task<(string Message, List<OpenAiTool> Tools)> PrepareLlmMessageAsync(
+    public async Task<LlmRequest> PrepareLlmMessageAsync(
         Agent agent,
         Prompt prompt,
         string userMessage,
         string sessionId,
-        IList<ChatHistory> recentMessages)
+        List<ChatHistory> recentMessages)
     {
-        var tools = BuilolsFromAgent(agent);
+        // Get all available tools from the agent
+        var allTools = BuilolsFromAgent(agent);
+        
+        // Filter out tools that were executed and succeeded in the last message
+        var filteredTools = FilterToolsBasedOnLastExecution(allTools, recentMessages);
 
-        var conversationContext = BuildConversationContext(recentMessages);
+        recentMessages.Add( new ChatHistory{Role = "system", Content = prompt.Content });
 
         Console.WriteLine($"Session ID: {sessionId}");
         Console.WriteLine($"Chat History Count: {recentMessages.Count}");
-        Console.WriteLine($"Conversation Context Length: {conversationContext.Length}");
+        Console.WriteLine($"Total Tools Available: {allTools.Count}");
+        Console.WriteLine($"Tools After Filtering: {filteredTools.Count}");
 
-        var fullMessage = $"{prompt.Content}\n\n{conversationContext}\n\nUser: {userMessage}";
-        return (fullMessage, tools);
+        return  new LlmRequest {Messages = recentMessages, Tools = filteredTools};
     }
 
     /// <summary>
@@ -207,73 +211,18 @@ public class LlmService(ILlmRepository llmRepository, ILlmProviderFactory provid
     /// <param name="tools">Optional list of tools available to the LLM.</param>
     /// <param name="toolCalls">Optional list of previous tool calls for context.</param>
     /// <returns>An async enumerable of response chunks from the LLM provider.</returns>
-    public async IAsyncEnumerable<string> SenLlmProviderStreamAsync(
-        LlmConfig llmConfig,
-        string message,
-        List<OpenAiTool>? tools = null,
-        List<ToolCall>? toolCalls = null)
-    {
-        var provider = providerFactory.GetProvider(llmConfig.Provider);
-
-        var config = mapper.Map<LlmConfig>(llmConfig);
-
-        await foreach (var chunk in provider.SendMessageStreamAsync(config, message, tools, toolCalls))
-        {
-            yield return chunk;
-        }
-    }
-
-    /// <summary>
-    ///     Builds a conversation context string from recent chat history for LLM context.
-    /// </summary>
-    /// <param name="recentMessages">The list of recent chat messages to include in context.</param>
-    /// <returns>A formatted string containing conversation context with truncated message content.</returns>
-    public string BuildConversationContext(IList<ChatHistory> recentMessages)
-    {
-        if (!recentMessages.Any())
-        {
-            return string.Empty;
-        }
-
-        var contextLines = new List<string> { "Previous conversation context:" };
-
-        foreach (var message in recentMessages)
-        {
-            var role = message.Role == "user" ? "User" : "Assistant";
-            var content = message.Content.Length > 200
-                ? message.Content.Substring(0, 200) + "..."
-                : message.Content;
-
-            contextLines.Add($"{role}: {content}");
-        }
-
-        contextLines.Add("---");
-        return string.Join("\n", contextLines);
-    }
-
-    /// <summary>
-    ///     Sends a message to an LLM provider and returns a streaming response.
-    /// </summary>
-    /// <param name="llmConfig">The LLM configuration containing provider and model details.</param>
-    /// <param name="message">The message to send to the LLM.</param>
-    /// <param name="tools">Optional list of tools available to the LLM.</param>
-    /// <param name="toolCalls">Optional list of previous tool calls for context.</param>
-    /// <returns>An async enumerable of response chunks from the LLM provider.</returns>
-    public async IAsyncEnumerable<StreamingResult> SendToLlmProviderStreamAsync(
-        LlmConfig llmConfig,
-        string? message,
-        List<OpenAiTool>? tools = null,
-        List<ToolCall>? toolCalls = null)
+    public async IAsyncEnumerable<StreamingResult> SendToLlmProviderStreamAsync(LlmConfig llmConfig, LlmRequest request)
     {
         var provider = providerFactory.GetProvider(llmConfig.Provider);
 
         var config = mapper.Map<LlmConfig>(llmConfig);
 
       
-        await foreach (var chunk in provider.StreamChatWithTools(config, message, tools))
+        await foreach (var chunk in provider.StreamChatWithTools(config, request.Messages, request.Tools))
         {
             yield return chunk!;
         }
+
     }
 
     /// <summary>
@@ -401,6 +350,62 @@ public class LlmService(ILlmRepository llmRepository, ILlmProviderFactory provid
             .ToList();
 
         return availableTools.Select(CreateOpenAiTool).OfType<OpenAiTool>().ToList();
+    }
+
+    /// <summary>
+    ///     Filters out tools that were executed and succeeded in the last message of chat history.
+    /// </summary>
+    /// <param name="allTools">All available tools from the agent.</param>
+    /// <param name="recentMessages">Recent conversation history.</param>
+    /// <returns>Filtered list of tools excluding those executed and succeeded in the last message.</returns>
+    private List<OpenAiTool> FilterToolsBasedOnLastExecution(List<OpenAiTool> allTools, List<ChatHistory> recentMessages)
+    {
+        // If no messages or no tools, return all tools
+        if (!recentMessages.Any() || !allTools.Any())
+        {
+            return allTools;
+        }
+
+        // Get the last message from chat history
+        var lastMessage = recentMessages.LastOrDefault();
+        if (lastMessage == null)
+        {
+            return allTools;
+        }
+
+        // Get tool names that were executed and succeeded in the last message
+        var executedAndSucceededTools = new HashSet<string>();
+
+        // Check ToolResults array (new format)
+        if (lastMessage.ToolResults != null && lastMessage.ToolResults.Any())
+        {
+            foreach (var toolResult in lastMessage.ToolResults)
+            {
+                if (toolResult.Success && !string.IsNullOrEmpty(toolResult.ToolName))
+                {
+                    executedAndSucceededTools.Add(toolResult.ToolName);
+                }
+            }
+        }
+        // Note: Legacy single tool execution format is not supported for filtering
+        // as ChatHistory doesn't have a Success property
+
+        // If no tools were executed and succeeded, return all tools
+        if (!executedAndSucceededTools.Any())
+        {
+            return allTools;
+        }
+
+        // Filter out tools that were executed and succeeded
+        var filteredTools = allTools.Where(tool => 
+            tool.Function != null && 
+            !executedAndSucceededTools.Contains(tool.Function.Name)
+        ).ToList();
+
+        Console.WriteLine($"Tools executed and succeeded in last message: {string.Join(", ", executedAndSucceededTools)}");
+        Console.WriteLine($"Filtered out {allTools.Count - filteredTools.Count} tools");
+
+        return filteredTools;
     }
 
     /// <summary>

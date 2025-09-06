@@ -1,4 +1,5 @@
 using System.ComponentModel.DataAnnotations;
+using Andy.Agentic.Domain.Models;
 
 public class ChatMessage
 {
@@ -6,7 +7,9 @@ public class ChatMessage
 
     [Required] public Guid? AgentId { get; set; }
 
-    public string SessionId { get; set; } = string.Empty;
+    public string? AgentName { get; set; }
+
+    public string? SessionId { get; set; } = string.Empty;
 
     public string Role { get; set; } = "user";
 
@@ -14,7 +17,5 @@ public class ChatMessage
 
     public bool IsToolExecution { get; set; }
 
-    public string? ToolName { get; set; }
-
-    public string? ToolResult { get; set; }
+    public List<ToolExecutionLog> ToolResults { get; set; } = new();
 }

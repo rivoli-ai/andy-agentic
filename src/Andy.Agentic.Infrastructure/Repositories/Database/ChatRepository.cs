@@ -28,6 +28,8 @@ namespace Andy.Agentic.Infrastructure.Repositories.Database
         {
            return await context.ChatMessages
                 .Where(ch => ch.SessionId == sessionId)
+                .Include(x=>x.ToolResults)
+                .ThenInclude(x=>x.Tool)
                 .OrderBy(ch => ch.Timestamp)
                 .Take(maxCount)
                 .ToListAsync();

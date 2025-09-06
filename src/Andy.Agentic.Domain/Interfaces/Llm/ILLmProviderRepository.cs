@@ -27,10 +27,9 @@ public interface ILLmProviderRepository
         List<OpenAiTool>? tools = null,
         List<ToolCall>? toolCalls = null);
 
-     IAsyncEnumerable<StreamingResult> StreamChatWithTools(
-        LlmConfig config,
-        string message,
-        List<OpenAiTool> tools);
+     IAsyncEnumerable<StreamingResult> StreamChatWithTools(LlmConfig config,
+         List<ChatHistory> message,
+         List<OpenAiTool> tools);
 
     /// <summary>
     ///     Checks if this repository can handle the given provider

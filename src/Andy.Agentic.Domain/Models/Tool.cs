@@ -61,6 +61,11 @@ public class Tool
     public string? Parameters { get; set; }
 
     /// <summary>
+    ///     Gets or sets the headers schema for the tool.
+    /// </summary>
+    public string? Headers { get; set; }
+
+    /// <summary>
     ///     Gets or sets when the tool was created.
     /// </summary>
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;

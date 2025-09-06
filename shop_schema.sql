@@ -281,6 +281,7 @@ CREATE TABLE `tools` (
   `Configuration` longtext DEFAULT NULL,
   `Authentication` longtext DEFAULT NULL,
   `Parameters` longtext DEFAULT NULL,
+  `Headers` longtext DEFAULT NULL,
   `CreatedAt` datetime(6) NOT NULL,
   `UpdatedAt` datetime(6) NOT NULL,
   PRIMARY KEY (`Id`),

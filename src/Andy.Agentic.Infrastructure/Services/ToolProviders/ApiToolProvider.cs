@@ -1,7 +1,5 @@
 using Andy.Agentic.Domain.Interfaces;
 using Andy.Agentic.Domain.Models;
-using System.Collections.Generic;
-using System.Reflection.Metadata;
 using System.Text;
 using System.Text.Json;
 using System.Web;
@@ -39,11 +37,11 @@ public class ApiToolProvider(HttpClient httpClient) : IToolProvider
         {
             var configuration = ParseConfiguration(tool.Configuration);
             var auth = ParseAuthentication(tool.Authentication);
-            var parameters = requestParameters.Any() ? requestParameters : ParseParameters(tool.Parameters);
+            var parameters = requestParameters.Any() ? requestParameters : Parse(tool.Parameters);
 
             var endpoint = GetRequiredConfigValue<string>(configuration, "endpoint");
             var method = GetConfigValue<string>(configuration, "method", "GET").ToUpper();
-            var headers = GetConfigValue(configuration, "headers", new Dictionary<string, object>());
+            var headers = Parse(tool.Headers);
 
             using var request = new HttpRequestMessage();
             request.Method = GetHttpMethod(method);
@@ -117,7 +115,7 @@ public class ApiToolProvider(HttpClient httpClient) : IToolProvider
         }
     }
 
-    private static Dictionary<string, object> ParseParameters(string? parameters)
+    private static Dictionary<string, object> Parse(string? parameters)
     {
         if (string.IsNullOrWhiteSpace(parameters))
         {
@@ -129,12 +127,12 @@ public class ApiToolProvider(HttpClient httpClient) : IToolProvider
             var parsedList = JsonSerializer.Deserialize<List<Dictionary<string,object>>>(
                 parameters,
                 new JsonSerializerOptions { PropertyNameCaseInsensitive = true }
-            ) ?? new List<Dictionary<string, object>>();
+            ) ?? [];
 
             var result = new Dictionary<string, object>();
             foreach (var param in parsedList)
             {
-                if (!string.IsNullOrEmpty(param["name"]?.ToString()))
+                if (!string.IsNullOrEmpty(param["name"].ToString()))
                 {
                     result["name"] = param["default"];
                 }

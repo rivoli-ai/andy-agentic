@@ -72,4 +72,10 @@ public class ChatMessageEntity
     ///     Navigation property to the related agent.
     /// </summary>
     public virtual AgentEntity? Agent { get; set; }
+
+    /// <summary>
+    ///     Tool Execution Results
+    /// </summary>
+
+    public List<ToolExecutionLogEntity> ToolResults { get; set; } = new();
 }

@@ -1,153 +1,202 @@
-using System.Diagnostics;
-using System.Text.Json;
 using Andy.Agentic.Domain.Interfaces;
 using Andy.Agentic.Domain.Models;
+using Microsoft.AspNetCore.Authentication.OAuth;
+using Microsoft.Extensions.Logging;
+using ModelContextProtocol;
+using ModelContextProtocol.Client;
+using ModelContextProtocol.Protocol;
+using System.Text.Json;
+using IMcpClient = ModelContextProtocol.Client.IMcpClient;
 
 namespace Andy.Agentic.Infrastructure.Services.ToolProviders;
 
-/// <summary>
-/// Tool provider for executing MCP (Model Context Protocol) based tools
-/// </summary>
-public class McpToolProvider : IToolProvider
+public class McpToolProvider(ILogger<McpToolProvider> logger) : IToolProvider
 {
+    private readonly ILogger<McpToolProvider> _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+
     public string ToolType => "mcp";
 
-    public async Task<object?> ExecuteToolAsync(Tool tool, Dictionary<string, object> requestParameters)
+    public async Task<object?> ExecuteToolAsync(Domain.Models.Tool tool, Dictionary<string, object> requestParameters)
     {
+        if (tool == null)
+            throw new ArgumentNullException(nameof(tool));
+
+        IMcpClient? client = null;
         try
         {
-            // Parse MCP configuration from tool
-            var configuration = tool.Configuration != null
-                ? JsonSerializer.Deserialize<Dictionary<string, object>>(tool.Configuration)
-                : new Dictionary<string, object>();
+            var configuration = ParseConfiguration(tool.Configuration);
+            var auth = ParseAuthentication(tool.Authentication);
 
-            var auth = tool.Authentication != null
-                ? JsonSerializer.Deserialize<Dictionary<string, object>>(tool.Authentication)
-                : new Dictionary<string, object>();
+            var endpoint = GetRequiredConfigValue<string>(configuration, "endpoint");
+            var mcpType = GetConfigValue(configuration, "mcpType", "stdio");
+            var toolName = GetRequiredConfigValue<string>(configuration, "name");
 
-            // Extract MCP configuration
-            var command = configuration.GetValueOrDefault("command", "").ToString();
-            var arguments = configuration.GetValueOrDefault("arguments", new List<string>()) as List<string>;
-            var workingDirectory = configuration.GetValueOrDefault("workingDirectory", "").ToString();
-            var timeout = configuration.GetValueOrDefault("timeout", 30000) as int? ?? 30000;
 
-            if (string.IsNullOrEmpty(command))
-            {
-                throw new ArgumentException("MCP command is required in tool configuration");
-            }
+            client = await CreateMcpClientAsync(endpoint, mcpType, configuration, auth);
 
-            // Prepare command arguments
-            var processArgs = new List<string>();
-            
-            // Add static arguments from configuration
-            if (arguments != null)
-            {
-                processArgs.AddRange(arguments);
-            }
+            var result = await client.CallToolAsync(toolName, requestParameters);
 
-            // Add dynamic parameters as arguments
-            //foreach (var param in parameters)
-            //{
-            //    processArgs.Add($"--{param.Key}");
-            //    processArgs.Add(param.Value?.ToString() ?? "");
-            //}
+            logger.LogInformation("Successfully executed MCP tool '{ToolName}' on endpoint '{Endpoint}'",
+                toolName, endpoint);
 
-            // Execute the MCP command
-            var result = await ExecuteMcpCommandAsync(command, processArgs, workingDirectory, timeout);
-            
-            return result;
+            return ExtractContentFromResult(result);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (!(ex is ArgumentException || ex is InvalidOperationException))
         {
+            _logger.LogError(ex, "Failed to execute MCP tool '{ToolName}': {ErrorMessage}",
+                tool.Name, ex.Message);
             throw new InvalidOperationException($"Failed to execute MCP tool '{tool.Name}': {ex.Message}", ex);
         }
     }
 
-    public bool CanHandleToolType(string toolType)
+    public bool CanHandleToolType(string toolType) =>
+        string.Equals(toolType, ToolType, StringComparison.OrdinalIgnoreCase);
+
+    private async Task<IMcpClient> CreateMcpClientAsync(
+        string endpoint,
+        string mcpType,
+        Dictionary<string, object> configuration,
+        Dictionary<string, object> auth)
     {
-        return string.Equals(toolType, ToolType, StringComparison.OrdinalIgnoreCase);
+        IClientTransport transport = mcpType.ToLowerInvariant() switch
+        {
+            "stdio" => CreateStdioTransport(endpoint, configuration, auth),
+            "sse" => CreateSseTransport(endpoint, configuration, auth),
+            _ => throw new ArgumentException($"Unsupported MCP transport type: {mcpType}")
+        };
+
+        return await McpClientFactory.CreateAsync(transport);
     }
 
-    private async Task<object?> ExecuteMcpCommandAsync(string command, List<string> arguments, string? workingDirectory, int timeoutMs)
+    private IClientTransport CreateStdioTransport(
+        string endpoint,
+        Dictionary<string, object> configuration,
+        Dictionary<string, object> auth)
     {
-        var startInfo = new ProcessStartInfo
+        var commandParts = endpoint.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        if (commandParts.Length == 0)
+            throw new ArgumentException("STDIO endpoint must contain command");
+
+        var command = commandParts[0];
+        var args = commandParts.Skip(1).ToArray();
+
+        var workingDirectory = GetConfigValue<string>(configuration, "workingDirectory", null);
+        var environmentVariables = GetConfigValue(configuration, "env", new Dictionary<string, string>());
+
+        foreach (var kvp in auth)
+            environmentVariables[kvp.Key] = kvp.Value?.ToString() ?? string.Empty;
+
+        var options = new StdioClientTransportOptions
         {
-            FileName = command,
-            Arguments = string.Join(" ", arguments.Select(arg => $"\"{arg}\"")),
-            UseShellExecute = false,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            CreateNoWindow = true
+            Name = GetConfigValue(configuration, "name", "STDIO Client"),
+            Command = command,
+            Arguments = args,
+            WorkingDirectory = workingDirectory,
+            EnvironmentVariables = environmentVariables
         };
 
-        if (!string.IsNullOrEmpty(workingDirectory))
-        {
-            startInfo.WorkingDirectory = workingDirectory;
-        }
+        return new StdioClientTransport(options);
+    }
 
-        using var process = new Process { StartInfo = startInfo };
-        
-        var outputBuilder = new List<string>();
-        var errorBuilder = new List<string>();
-
-        // Set up event handlers for output
-        process.OutputDataReceived += (sender, e) =>
+    private IClientTransport CreateSseTransport(
+        string endpoint,
+        Dictionary<string, object> configuration,
+        Dictionary<string, object> headers)
+    {
+        var options = new SseClientTransportOptions
         {
-            if (!string.IsNullOrEmpty(e.Data))
-            {
-                outputBuilder.Add(e.Data);
-            }
+            Endpoint = new Uri(endpoint),
+            Name = GetConfigValue(configuration, "name", "SSE Client"),
+            AdditionalHeaders = headers.ToDictionary(kvp => kvp.Key, kvp => kvp.Value?.ToString() ?? string.Empty)
         };
 
-        process.ErrorDataReceived += (sender, e) =>
+        var timeout = GetConfigValue<TimeSpan?>(configuration, "timeout", null);
+         if (timeout.HasValue)
+            options.ConnectionTimeout = timeout.Value;
+
+        return new SseClientTransport(options);
+    }
+
+
+    private static Task HandleAuthorizationUrlAsync(Uri url, CancellationToken cancellationToken)
+    {
+        Console.WriteLine($"Please open the following URL in your browser to authorize: {url}");
+        return Task.CompletedTask;
+    }
+
+    private static object? ExtractContentFromResult(CallToolResult result)
+    {
+        if (result.Content == null || !result.Content.Any())
+            return null;
+
+        if (result.Content.Count == 1 && result.Content.First() is TextContentBlock textContent)
+            return textContent.Text;
+
+        return result.Content.Select<ContentBlock, object>(content => content switch
         {
-            if (!string.IsNullOrEmpty(e.Data))
-            {
-                errorBuilder.Add(e.Data);
-            }
-        };
+            TextContentBlock text => new { type = "text", text = text.Text },
+            ImageContentBlock image => new { type = "image", data = image.Data, mimeType = image.MimeType },
+            _ => new { type = "unknown", content }
+        }).ToList();
+    }
+
+    private static Dictionary<string, object> ParseConfiguration(string? configuration)
+    {
+        if (string.IsNullOrEmpty(configuration))
+            return new Dictionary<string, object>();
 
         try
         {
-            process.Start();
-            process.BeginOutputReadLine();
-            process.BeginErrorReadLine();
-
-            // Wait for process to complete with timeout
-            //var completed = await process.WaitForExitAsync(TimeSpan.FromMilliseconds(timeoutMs));
-            
-            //if (!completed)
-            //{
-            //    process.Kill();
-            //    throw new TimeoutException($"MCP command timed out after {timeoutMs}ms");
-            //}
-
-            var output = string.Join("\n", outputBuilder);
-            var error = string.Join("\n", errorBuilder);
-
-            if (process.ExitCode != 0)
-            {
-                throw new InvalidOperationException($"MCP command failed with exit code {process.ExitCode}. Error: {error}");
-            }
-
-            // Try to parse output as JSON, fallback to string
-            if (!string.IsNullOrEmpty(output))
-            {
-                try
-                {
-                    return JsonSerializer.Deserialize<object>(output);
-                }
-                catch
-                {
-                    return output;
-                }
-            }
-
-            return null;
+            return JsonSerializer.Deserialize<Dictionary<string, object>>(configuration)
+                   ?? new Dictionary<string, object>();
         }
-        catch (Exception ex) when (!(ex is TimeoutException || ex is InvalidOperationException))
+        catch (JsonException ex)
         {
-            throw new InvalidOperationException($"Failed to execute MCP command: {ex.Message}", ex);
+            throw new ArgumentException("Invalid JSON in tool configuration", nameof(configuration), ex);
         }
+    }
+
+    private static Dictionary<string, object> ParseAuthentication(string? authentication)
+    {
+        if (string.IsNullOrEmpty(authentication))
+            return new Dictionary<string, object>();
+
+        try
+        {
+            return JsonSerializer.Deserialize<Dictionary<string, object>>(authentication)
+                   ?? new Dictionary<string, object>();
+        }
+        catch (JsonException ex)
+        {
+            throw new ArgumentException("Invalid JSON in tool authentication", nameof(authentication), ex);
+        }
+    }
+
+    private static T GetRequiredConfigValue<T>(Dictionary<string, object> configuration, string key)
+    {
+        if (!configuration.TryGetValue(key, out var value))
+            throw new ArgumentException($"Required configuration key '{key}' not found");
+
+        if (value is JsonElement jsonElement)
+            return jsonElement.Deserialize<T>() ?? throw new ArgumentException($"Invalid value for configuration key '{key}'");
+
+        if (value is T directValue)
+            return directValue;
+
+        throw new ArgumentException($"Invalid value type for configuration key '{key}'");
+    }
+
+    private static T GetConfigValue<T>(Dictionary<string, object> configuration, string key, T defaultValue)
+    {
+        if (!configuration.TryGetValue(key, out var value))
+            return defaultValue;
+
+        if (value is JsonElement jsonElement)
+            return jsonElement.Deserialize<T>() ?? defaultValue;
+
+        if (value is T directValue)
+            return directValue;
+
+        return defaultValue;
     }
 }

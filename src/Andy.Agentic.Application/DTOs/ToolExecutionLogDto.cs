@@ -1,3 +1,4 @@
+using Andy.Agentic.Domain.Models;
 using System.ComponentModel.DataAnnotations;
 
 namespace Andy.Agentic.Application.DTOs;
@@ -74,5 +75,11 @@ public class ToolExecutionLogDto
     public double ExecutionTime { get; set; }
 
     public Dictionary<string, object>? UsedParameters { get; set; }
+
+    /// <summary>
+    ///     Identifier of the executed tool.
+    /// </summary>
+    [Required]
+    public ToolDto Tool { get; set; }
 }
 

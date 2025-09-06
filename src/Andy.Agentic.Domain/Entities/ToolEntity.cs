@@ -61,6 +61,11 @@ public class ToolEntity
     public string? Parameters { get; set; }
 
     /// <summary>
+    ///     Optional headers schema or serialized headers.
+    /// </summary>
+    public string? Headers { get; set; }
+
+    /// <summary>
     ///     UTC timestamp when the tool was created.
     /// </summary>
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;

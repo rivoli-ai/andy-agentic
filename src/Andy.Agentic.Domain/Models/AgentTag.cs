@@ -25,4 +25,3 @@ public class AgentTag
     /// </summary>
     public virtual Tag? Tag { get; set; } = null!;
 }
-

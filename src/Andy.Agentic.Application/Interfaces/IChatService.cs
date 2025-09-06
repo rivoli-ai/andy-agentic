@@ -43,5 +43,6 @@ public interface IChatService
     Prompt? GetActivePrompt(Agent agent);
 
     IAsyncEnumerable<string> SendMessageStreamRecursiveAsync(Agent agent, Prompt activePrompt,
-        string messageContent, string sessionId);
+        string messageContent, string sessionId,
+        List<ToolExecutionLog>? toolResults = null);
 }

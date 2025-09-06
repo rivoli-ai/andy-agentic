@@ -1,3 +1,5 @@
+using Andy.Agentic.Domain.Models;
+
 namespace Andy.Agentic.Application.DTOs;
 
 /// <summary>
@@ -17,5 +19,8 @@ public class ChatHistoryDto
     public bool IsToolExecution { get; set; }
     public string? ToolName { get; set; }
     public string? ToolResult { get; set; }
+
+
+    public List<ToolExecutionLogDto> ToolResults { get; set; } = new();
 }
 
