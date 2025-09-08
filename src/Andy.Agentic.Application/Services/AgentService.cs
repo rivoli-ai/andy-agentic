@@ -70,4 +70,22 @@ public class AgentService(IDataBaseService databaseResourceAccess, IMapper mappe
     /// <returns>A collection of agent s associated with the specified tag.</returns>
     public async Task<IEnumerable<Agent>> GetAgentsByTagAsync(string tag) =>
         await databaseResourceAccess.GetAgentsByTagAsync(tag);
+
+    /// <summary>
+    ///     Retrieves agents visible to the specified user.
+    ///     Returns public agents and agents created by the user.
+    /// </summary>
+    /// <param name="userId">The ID of the user requesting the agents.</param>
+    /// <returns>A collection of visible agents.</returns>
+    public async Task<IEnumerable<Agent>> GetVisibleAgentsAsync(Guid userId) =>
+        await databaseResourceAccess.GetVisibleAgentsAsync(userId);
+
+    /// <summary>
+    ///     Retrieves a specific agent by ID if it's visible to the specified user.
+    /// </summary>
+    /// <param name="id">The ID of the agent.</param>
+    /// <param name="userId">The ID of the user requesting the agent.</param>
+    /// <returns>The agent if found and visible; otherwise, null.</returns>
+    public async Task<Agent?> GetVisibleAgentByIdAsync(Guid id, Guid userId) =>
+        await databaseResourceAccess.GetVisibleAgentByIdAsync(id, userId);
 }

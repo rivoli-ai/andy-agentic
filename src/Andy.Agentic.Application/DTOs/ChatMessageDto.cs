@@ -25,6 +25,8 @@ public class ChatMessageDto
 
     public string? ToolResult { get; set; }
 
+    public Guid? UserId { get; set; }
+
     /// <summary>
     ///     Tool Execution Results
     /// </summary>

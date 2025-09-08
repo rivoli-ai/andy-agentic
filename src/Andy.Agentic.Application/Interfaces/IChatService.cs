@@ -15,11 +15,18 @@ public interface IChatService
     Task<IEnumerable<ChatHistory>> GetChatHistoryWithFilterAsync(ChatHistoryFilter filter);
     Task<ChatHistorySummary> GetChatHistorySummaryAsync(Guid? agentId = null);
 
+    // User-specific Chat History Management
+    Task<IEnumerable<ChatHistory>> GetChatHistoryForUserAsync(Guid agentId, Guid userId);
+    Task<IEnumerable<ChatHistory>> GetChatHistoryBySessionForUserAsync(string sessionId, Guid userId);
+
     // Chat Sessions Management
     Task<IEnumerable<ChatSession>> GetChatSessionsAsync(Guid? agentId = null);
     Task<ChatSession> GetChatSessionAsync(string sessionId);
+    Task<IEnumerable<ChatSession>> GetChatSessionsForUserAsync(Guid? agentId, Guid userId);
+    Task<ChatSession?> GetChatSessionForUserAsync(string sessionId, Guid userId);
     Task<ChatSessionSummary> GetChatSessionSummaryAsync(string sessionId);
     Task<string> CreateNewChatSessionAsync(Guid agentId, string? sessionTitle = null);
+    Task<string> CreateNewChatSessionForUserAsync(Guid agentId, Guid userId, string? sessionTitle = null);
     Task<bool> CloseChatSessionAsync(string sessionId);
     Task<bool> DeleteChatSessionAsync(string sessionId);
     Task<bool> RenameChatSessionAsync(string sessionId, string newTitle);

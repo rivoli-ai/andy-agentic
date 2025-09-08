@@ -95,6 +95,24 @@ namespace Andy.Agentic.Infrastructure.Repositories.Database
             return await query.ToListAsync();
         }
 
+        public async Task<IEnumerable<ChatMessageEntity>> GetHistoryForUserAsync(Guid? agentId, Guid userId)
+        {
+            return await context.ChatMessages
+                .Where(ch => ch.AgentId == agentId && ch.UserId == userId)
+                .OrderByDescending(ch => ch.Timestamp)
+                .ToListAsync();
+        }
+
+        public async Task<IEnumerable<ChatMessageEntity>> GetHistoryBySessionForUserAsync(string sessionId, Guid userId)
+        {
+            return await context.ChatMessages
+                .Where(ch => ch.SessionId == sessionId && ch.UserId == userId)
+                .Include(x => x.ToolResults)
+                .ThenInclude(x => x.Tool)
+                .OrderBy(ch => ch.Timestamp)
+                .ToListAsync();
+        }
+
         public async Task<ChatMessageEntity> SaveMessageAsync(ChatMessageEntity message)
         {
             if (message.Id == Guid.Empty)
@@ -179,6 +197,29 @@ namespace Andy.Agentic.Infrastructure.Repositories.Database
                 Role = "system",
                 AgentId = agentId,
                 SessionId = sessionId,
+                Timestamp = DateTime.UtcNow,
+                IsToolExecution = false
+            };
+
+            context.ChatMessages.Add(sessionMessage);
+            await context.SaveChangesAsync();
+
+            return sessionId;
+        }
+
+        public async Task<string> CreateNewSessionForUserAsync(Guid agentId, Guid userId, string? sessionTitle = null)
+        {
+            var sessionId = Guid.NewGuid().ToString();
+
+            // Create a session marker message with user ID
+            var sessionMessage = new ChatMessageEntity
+            {
+                Id = Guid.NewGuid(),
+                Content = sessionTitle ?? "New Chat Session",
+                Role = "system",
+                AgentId = agentId,
+                SessionId = sessionId,
+                UserId = userId,
                 Timestamp = DateTime.UtcNow,
                 IsToolExecution = false
             };

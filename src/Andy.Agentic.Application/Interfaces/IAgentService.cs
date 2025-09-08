@@ -13,4 +13,8 @@ public interface IAgentService
     Task<IEnumerable<Agent>> SearchAgentsAsync(string searchTerm);
     Task<IEnumerable<Agent>> GetAgentsByTypeAsync(string type);
     Task<IEnumerable<Agent>> GetAgentsByTagAsync(string tag);
+    
+    // New methods for public/private visibility
+    Task<IEnumerable<Agent>> GetVisibleAgentsAsync(Guid userId);
+    Task<Agent?> GetVisibleAgentByIdAsync(Guid id, Guid userId);
 }

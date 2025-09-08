@@ -74,4 +74,19 @@ public class ToolEntity
     ///     UTC timestamp when the tool was last updated.
     /// </summary>
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
+
+    /// <summary>
+    ///     Foreign key referencing the user who created this tool.
+    /// </summary>
+    public Guid? CreatedByUserId { get; set; }
+
+    /// <summary>
+    ///     Navigation property to the user who created this tool.
+    /// </summary>
+    public virtual UserEntity? CreatedByUser { get; set; }
+
+    /// <summary>
+    ///     Indicates whether this tool is public and visible to all users.
+    /// </summary>
+    public bool IsPublic { get; set; } = false;
 }

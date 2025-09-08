@@ -14,7 +14,7 @@ public class AgentTagDto
     /// <summary>
     ///     Gets or sets the ID of the agent.
     /// </summary>
-    public Guid AgentId { get; set; }
+    public Guid? AgentId { get; set; }
 
     /// Gets or sets the ID of the agent.
     /// </summary>

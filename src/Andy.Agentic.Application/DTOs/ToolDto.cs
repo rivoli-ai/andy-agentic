@@ -74,5 +74,15 @@ public class ToolDto
     ///     Gets or sets when the tool was last updated.
     /// </summary>
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
+
+    /// <summary>
+    ///     Gets or sets the ID of the user who created this tool.
+    /// </summary>
+    public Guid? CreatedByUserId { get; set; }
+
+    /// <summary>
+    ///     Gets or sets whether this tool is public and visible to all users.
+    /// </summary>
+    public bool IsPublic { get; set; } = false;
 }
 

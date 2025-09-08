@@ -51,6 +51,16 @@ public class ToolExecutionLogEntity
     public string? SessionId { get; set; }
 
     /// <summary>
+    ///     Foreign key referencing the user who executed this tool.
+    /// </summary>
+    public Guid? UserId { get; set; }
+
+    /// <summary>
+    ///     Navigation property to the user who executed this tool.
+    /// </summary>
+    public virtual UserEntity? User { get; set; }
+
+    /// <summary>
     ///     Serialized parameters passed to the tool.
     /// </summary>
     public string? Parameters { get; set; }

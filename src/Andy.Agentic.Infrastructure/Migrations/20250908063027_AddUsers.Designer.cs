@@ -4,6 +4,7 @@ using Andy.Agentic.Infrastructure.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 #nullable disable
@@ -11,9 +12,11 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace Andy.Agentic.Infrastructure.Migrations
 {
     [DbContext(typeof(AndyDbContext))]
-    partial class AndyDbContextModelSnapshot : ModelSnapshot
+    [Migration("20250908063027_AddUsers")]
+    partial class AddUsers
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -31,7 +34,7 @@ namespace Andy.Agentic.Infrastructure.Migrations
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("datetime(6)");
 
-                    b.Property<Guid?>("CreatedByUserId")
+                    b.Property<Guid>("CreatedByUserId")
                         .HasColumnType("char(36)");
 
                     b.Property<string>("Description")
@@ -43,9 +46,6 @@ namespace Andy.Agentic.Infrastructure.Migrations
                         .HasColumnType("int");
 
                     b.Property<bool>("IsActive")
-                        .HasColumnType("tinyint(1)");
-
-                    b.Property<bool>("IsPublic")
                         .HasColumnType("tinyint(1)");
 
                     b.Property<Guid>("LlmConfigId")
@@ -221,16 +221,10 @@ namespace Andy.Agentic.Infrastructure.Migrations
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("datetime(6)");
 
-                    b.Property<Guid?>("CreatedByUserId")
-                        .HasColumnType("char(36)");
-
                     b.Property<double?>("FrequencyPenalty")
                         .HasColumnType("double");
 
                     b.Property<bool>("IsActive")
-                        .HasColumnType("tinyint(1)");
-
-                    b.Property<bool>("IsPublic")
                         .HasColumnType("tinyint(1)");
 
                     b.Property<int?>("MaxTokens")
@@ -264,8 +258,6 @@ namespace Andy.Agentic.Infrastructure.Migrations
                         .HasColumnType("datetime(6)");
 
                     b.HasKey("Id");
-
-                    b.HasIndex("CreatedByUserId");
 
                     b.ToTable("LlmConfigs");
                 });
@@ -432,9 +424,6 @@ namespace Andy.Agentic.Infrastructure.Migrations
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("datetime(6)");
 
-                    b.Property<Guid?>("CreatedByUserId")
-                        .HasColumnType("char(36)");
-
                     b.Property<string>("Description")
                         .IsRequired()
                         .HasMaxLength(500)
@@ -444,9 +433,6 @@ namespace Andy.Agentic.Infrastructure.Migrations
                         .HasColumnType("longtext");
 
                     b.Property<bool>("IsActive")
-                        .HasColumnType("tinyint(1)");
-
-                    b.Property<bool>("IsPublic")
                         .HasColumnType("tinyint(1)");
 
                     b.Property<string>("Name")
@@ -466,8 +452,6 @@ namespace Andy.Agentic.Infrastructure.Migrations
                         .HasColumnType("datetime(6)");
 
                     b.HasKey("Id");
-
-                    b.HasIndex("CreatedByUserId");
 
                     b.HasIndex("Name")
                         .IsUnique();
@@ -596,7 +580,8 @@ namespace Andy.Agentic.Infrastructure.Migrations
                     b.HasOne("Andy.Agentic.Domain.Entities.UserEntity", "CreatedByUser")
                         .WithMany("Agents")
                         .HasForeignKey("CreatedByUserId")
-                        .OnDelete(DeleteBehavior.Restrict);
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
 
                     b.HasOne("Andy.Agentic.Domain.Entities.LlmConfigEntity", "LlmConfig")
                         .WithMany()
@@ -675,16 +660,6 @@ namespace Andy.Agentic.Infrastructure.Migrations
                     b.Navigation("User");
                 });
 
-            modelBuilder.Entity("Andy.Agentic.Domain.Entities.LlmConfigEntity", b =>
-                {
-                    b.HasOne("Andy.Agentic.Domain.Entities.UserEntity", "CreatedByUser")
-                        .WithMany("LlmConfigs")
-                        .HasForeignKey("CreatedByUserId")
-                        .OnDelete(DeleteBehavior.Restrict);
-
-                    b.Navigation("CreatedByUser");
-                });
-
             modelBuilder.Entity("Andy.Agentic.Domain.Entities.PromptEntity", b =>
                 {
                     b.HasOne("Andy.Agentic.Domain.Entities.AgentEntity", "Agent")
@@ -705,16 +680,6 @@ namespace Andy.Agentic.Infrastructure.Migrations
                         .IsRequired();
 
                     b.Navigation("Prompt");
-                });
-
-            modelBuilder.Entity("Andy.Agentic.Domain.Entities.ToolEntity", b =>
-                {
-                    b.HasOne("Andy.Agentic.Domain.Entities.UserEntity", "CreatedByUser")
-                        .WithMany("Tools")
-                        .HasForeignKey("CreatedByUserId")
-                        .OnDelete(DeleteBehavior.Restrict);
-
-                    b.Navigation("CreatedByUser");
                 });
 
             modelBuilder.Entity("Andy.Agentic.Domain.Entities.ToolExecutionLogEntity", b =>
@@ -778,11 +743,7 @@ namespace Andy.Agentic.Infrastructure.Migrations
 
                     b.Navigation("ChatMessages");
 
-                    b.Navigation("LlmConfigs");
-
                     b.Navigation("ToolExecutions");
-
-                    b.Navigation("Tools");
                 });
 #pragma warning restore 612, 618
         }

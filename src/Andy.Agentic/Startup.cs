@@ -6,6 +6,7 @@ using Andy.Agentic.Domain.Interfaces.Database;
 using Andy.Agentic.Domain.Interfaces.Llm;
 using Andy.Agentic.Infrastructure.Data;
 using Andy.Agentic.Infrastructure.Mapping;
+using Andy.Agentic.Infrastructure.Repositories;
 using Andy.Agentic.Infrastructure.Repositories.Database;
 using Andy.Agentic.Infrastructure.Repositories.Llm;
 using Andy.Agentic.Infrastructure.Services;
@@ -13,6 +14,8 @@ using Andy.Agentic.Infrastructure.Services.ToolProviders;
 using Andy.Agentic.Infrastructure.UnitOfWorks;
 using Andy.ResourceAccess.DataBase;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Identity.Web;
+using Microsoft.AspNetCore.Authentication.JwtBearer;
 
 namespace Andy.Agentic;
 
@@ -70,13 +73,35 @@ public class Startup
         services.AddControllers();
         services.AddEndpointsApiExplorer();
         services.AddSwaggerGen();
+
+        // Add JWT Bearer authentication for Microsoft Graph tokens
+        services.AddAuthentication("Bearer")
+            .AddJwtBearer("Bearer", options =>
+            {
+                options.Authority = $"{ _configuration["AzureAd:Instance"]}{_configuration["AzureAd:TenantId"]}/v2.0";
+                options.TokenValidationParameters = new Microsoft.IdentityModel.Tokens.TokenValidationParameters
+                {
+                    ValidateAudience = true,
+                    ValidAudiences = new[] { $"{_configuration["AzureAd:Audience"]}", $"{_configuration["AzureAd:ClientId"]}" }
+                };
+            });
+
+        services.AddAuthorization(options =>
+        {
+            options.AddPolicy("ReadScope", policy =>
+            {
+                policy.RequireClaim("scp", "Api.Access");
+            });
+        });
+
         services.AddCors(options =>
         {
             options.AddPolicy("AllowAngularApp", policy =>
             {
                 policy.WithOrigins("http://flexagent.online", "http://localhost:4200")
                     .AllowAnyHeader()
-                    .AllowAnyMethod();
+                    .AllowAnyMethod()
+                    .AllowCredentials(); // Required for authentication
             });
         });
     }
@@ -117,6 +142,7 @@ public class Startup
         services.AddScoped<ITagRepository, TagRepository>();
         services.AddScoped<IMcpRepository, McpRepository>();
         services.AddScoped<IPromptRepository, PromptRepository>();
+        services.AddScoped<IUserRepository, UserRepository>();
 
         // LLM Provider Repositories
         services.AddScoped<ILLmProviderRepository, OpenAiRepository>();
@@ -141,6 +167,10 @@ public class Startup
         services.AddScoped<IChatService, ChatService>();
         services.AddScoped<ITagService, TagService>();
         services.AddScoped<IAgentService, AgentService>();
+        
+        // Authentication Services
+        services.AddScoped<IAuthService, AuthService>();
+        services.AddHttpContextAccessor();
     }
 
     /// <summary>
@@ -179,6 +209,7 @@ public class Startup
     private void ConfigureMiddleware(WebApplication app)
     {
         app.UseCors("AllowAngularApp");
+        app.UseAuthentication(); // Add this before UseAuthorization
         app.UseAuthorization();
         app.MapControllers();
     }
@@ -192,6 +223,6 @@ public class Startup
         using var scope = app.Services.CreateScope();
         var context = scope.ServiceProvider.GetRequiredService<AndyDbContext>();
         context.Database.Migrate();
-        DatabaseSeeder.SeedData(context);
+        //DatabaseSeeder.SeedData(context);
     }
 }

@@ -3,6 +3,7 @@ using Andy.Agentic.Application.Interfaces;
 using Andy.Agentic.Domain.Models;
 using AutoMapper;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Authorization;
 
 namespace Andy.Agentic.Controllers;
 
@@ -11,18 +12,26 @@ namespace Andy.Agentic.Controllers;
 /// </summary>
 [ApiController]
 [Route("api/[controller]")]
-public class AgentsController(IAgentService agentService, IMapper mapper) : ControllerBase
+[Authorize]
+public class AgentsController(IAgentService agentService, IMapper mapper, IAuthService authService) : ControllerBase
 {
     /// <summary>
-    ///     Retrieves all agents.
+    ///     Retrieves all agents visible to the current user.
+    ///     Returns public agents and agents created by the current user.
     /// </summary>
-    /// <returns>A list of all agents.</returns>
+    /// <returns>A list of visible agents.</returns>
     [HttpGet]
     public async Task<ActionResult<IEnumerable<AgentDto>>> GetAgents()
     {
         try
         {
-            var agents = await agentService.GetAllAgentsAsync();
+            var currentUser = await authService.GetCurrentUserAsync();
+            if (currentUser == null)
+            {
+                return Unauthorized(new { error = "User not authenticated" });
+            }
+
+            var agents = await agentService.GetVisibleAgentsAsync(currentUser.Id);
             return Ok(agents);
         }
         catch (Exception ex)
@@ -32,19 +41,25 @@ public class AgentsController(IAgentService agentService, IMapper mapper) : Cont
     }
 
     /// <summary>
-    ///     Retrieves a specific agent by its identifier.
+    ///     Retrieves a specific agent by its identifier if visible to the current user.
     /// </summary>
     /// <param name="id">The unique identifier of the agent.</param>
-    /// <returns>The agent details if found.</returns>
+    /// <returns>The agent details if found and visible.</returns>
     [HttpGet("{id}")]
     public async Task<ActionResult<AgentDto>> GetAgent(Guid id)
     {
         try
         {
-            var agent = await agentService.GetAgentByIdAsync(id);
+            var currentUser = await authService.GetCurrentUserAsync();
+            if (currentUser == null)
+            {
+                return Unauthorized(new { error = "User not authenticated" });
+            }
+
+            var agent = await agentService.GetVisibleAgentByIdAsync(id, currentUser.Id);
             if (agent == null)
             {
-                return NotFound(new { error = "Agent not found" });
+                return NotFound(new { error = "Agent not found or not accessible" });
             }
 
             return Ok(agent);
@@ -70,8 +85,18 @@ public class AgentsController(IAgentService agentService, IMapper mapper) : Cont
                 return BadRequest(ModelState);
             }
 
-            var agent = await agentService.CreateAgentAsync(mapper.Map<Agent>(createAgentDto));
-            return CreatedAtAction(nameof(GetAgent), new { id = agent.Id }, agent);
+            // Get the current user and set the CreatedByUserId
+            var currentUser = await authService.GetCurrentUserAsync();
+            if (currentUser == null)
+            {
+                return Unauthorized(new { error = "User not authenticated" });
+            }
+
+            var agent = mapper.Map<Agent>(createAgentDto);
+            agent.CreatedByUserId = currentUser.Id;
+            
+            var createdAgent = await agentService.CreateAgentAsync(agent);
+            return CreatedAtAction(nameof(GetAgent), new { id = createdAgent.Id }, createdAgent);
         }
         catch (ArgumentException ex)
         {
@@ -85,11 +110,13 @@ public class AgentsController(IAgentService agentService, IMapper mapper) : Cont
 
     /// <summary>
     ///     Updates an existing agent with new configuration data.
+    ///     Only the owner of the agent can update it.
     /// </summary>
+    /// <param name="id">The ID of the agent to update.</param>
     /// <param name="updateAgentDto">The updated agent data.</param>
     /// <returns>The updated agent details.</returns>
     [HttpPut("{id}")]
-    public async Task<ActionResult<AgentDto>> UpdateAgent([FromBody] AgentDto updateAgentDto)
+    public async Task<ActionResult<AgentDto>> UpdateAgent(Guid id, [FromBody] AgentDto updateAgentDto)
     {
         try
         {
@@ -98,8 +125,33 @@ public class AgentsController(IAgentService agentService, IMapper mapper) : Cont
                 return BadRequest(ModelState);
             }
 
-            var agent = await agentService.UpdateAgentAsync(mapper.Map<Agent>(updateAgentDto));
-            return Ok(agent);
+            var currentUser = await authService.GetCurrentUserAsync();
+            if (currentUser == null)
+            {
+                return Unauthorized(new { error = "User not authenticated" });
+            }
+
+            // Get the existing agent to check ownership and preserve data
+            var existingAgent = await agentService.GetAgentByIdAsync(id);
+            if (existingAgent == null)
+            {
+                return NotFound(new { error = "Agent not found" });
+            }
+
+            // Check if the current user owns this agent
+            if (existingAgent.CreatedByUserId != currentUser.Id)
+            {
+                return Forbid("You can only update agents you created");
+            }
+
+            var agent = mapper.Map<Agent>(updateAgentDto);
+            agent.Id = id; // Ensure the ID is set
+            agent.CreatedByUserId = existingAgent.CreatedByUserId; // Preserve the original creator
+            agent.CreatedAt = existingAgent.CreatedAt; // Preserve the original creation date
+            agent.UpdatedAt = DateTime.UtcNow; // Update the modification timestamp
+            
+            var updatedAgent = await agentService.UpdateAgentAsync(agent);
+            return Ok(updatedAgent);
         }
         catch (ArgumentException ex)
         {
@@ -113,6 +165,7 @@ public class AgentsController(IAgentService agentService, IMapper mapper) : Cont
 
     /// <summary>
     ///     Deletes an agent by its identifier.
+    ///     Only the owner of the agent can delete it.
     /// </summary>
     /// <param name="id">The unique identifier of the agent to delete.</param>
     /// <returns>Success or error response.</returns>
@@ -121,6 +174,24 @@ public class AgentsController(IAgentService agentService, IMapper mapper) : Cont
     {
         try
         {
+            var currentUser = await authService.GetCurrentUserAsync();
+            if (currentUser == null)
+            {
+                return Unauthorized(new { error = "User not authenticated" });
+            }
+
+            // Check if the agent exists and if the current user owns it
+            var existingAgent = await agentService.GetAgentByIdAsync(id);
+            if (existingAgent == null)
+            {
+                return NotFound(new { error = "Agent not found" });
+            }
+
+            if (existingAgent.CreatedByUserId != currentUser.Id)
+            {
+                return Forbid("You can only delete agents you created");
+            }
+
             var success = await agentService.DeleteAgentAsync(id);
             if (!success)
             {

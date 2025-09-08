@@ -87,5 +87,15 @@ public class LlmConfigDto
     ///     Gets or sets when the LLM configuration was last updated.
     /// </summary>
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
+
+    /// <summary>
+    ///     Gets or sets the ID of the user who created this LLM configuration.
+    /// </summary>
+    public Guid? CreatedByUserId { get; set; }
+
+    /// <summary>
+    ///     Gets or sets whether this LLM configuration is public and visible to all users.
+    /// </summary>
+    public bool IsPublic { get; set; } = false;
 }
 

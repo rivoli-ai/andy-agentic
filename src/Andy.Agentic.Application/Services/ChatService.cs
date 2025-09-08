@@ -175,6 +175,24 @@ public class ChatService(
         await databaseResourceAccess.GetChatHistorySummaryAsync(agentId);
 
     /// <summary>
+    /// Gets chat history for a specific agent, filtered by user.
+    /// </summary>
+    /// <param name="agentId">The unique identifier of the agent.</param>
+    /// <param name="userId">The unique identifier of the user.</param>
+    /// <returns>A collection of chat history entries for the agent and user.</returns>
+    public async Task<IEnumerable<ChatHistory>> GetChatHistoryForUserAsync(Guid agentId, Guid userId) =>
+        await databaseResourceAccess.GetChatHistoryForUserAsync(agentId, userId);
+
+    /// <summary>
+    /// Gets chat history for a specific session, filtered by user.
+    /// </summary>
+    /// <param name="sessionId">The unique identifier of the chat session.</param>
+    /// <param name="userId">The unique identifier of the user.</param>
+    /// <returns>A collection of chat history entries for the session and user.</returns>
+    public async Task<IEnumerable<ChatHistory>> GetChatHistoryBySessionForUserAsync(string sessionId, Guid userId) =>
+        await databaseResourceAccess.GetChatHistoryBySessionForUserAsync(sessionId, userId);
+
+    /// <summary>
     /// Gets all chat sessions, optionally filtered by agent ID.
     /// </summary>
     /// <param name="agentId">Optional agent ID to filter sessions by.</param>
@@ -189,6 +207,24 @@ public class ChatService(
     /// <returns>A ChatSession object containing session details.</returns>
     public async Task<ChatSession> GetChatSessionAsync(string sessionId) =>
         await databaseResourceAccess.GetChatSessionAsync(sessionId);
+
+    /// <summary>
+    /// Gets all chat sessions for a specific user, optionally filtered by agent ID.
+    /// </summary>
+    /// <param name="agentId">Optional agent ID to filter sessions by.</param>
+    /// <param name="userId">The unique identifier of the user.</param>
+    /// <returns>A collection of chat sessions for the user.</returns>
+    public async Task<IEnumerable<ChatSession>> GetChatSessionsForUserAsync(Guid? agentId, Guid userId) =>
+        await databaseResourceAccess.GetChatSessionsForUserAsync(agentId, userId);
+
+    /// <summary>
+    /// Gets a specific chat session by its unique identifier if owned by the user.
+    /// </summary>
+    /// <param name="sessionId">The unique identifier of the chat session.</param>
+    /// <param name="userId">The unique identifier of the user.</param>
+    /// <returns>A ChatSession object containing session details, or null if not found or not accessible.</returns>
+    public async Task<ChatSession?> GetChatSessionForUserAsync(string sessionId, Guid userId) =>
+        await databaseResourceAccess.GetChatSessionForUserAsync(sessionId, userId);
 
     /// <summary>
     /// Gets a detailed summary of a specific chat session including message count, tokens, and recent activity.
@@ -206,6 +242,16 @@ public class ChatService(
     /// <returns>The unique identifier of the newly created session.</returns>
     public async Task<string> CreateNewChatSessionAsync(Guid agentId, string? sessionTitle = null) =>
         await databaseResourceAccess.CreateNewChatSessionAsync(agentId, sessionTitle);
+
+    /// <summary>
+    /// Creates a new chat session for the specified agent and user.
+    /// </summary>
+    /// <param name="agentId">The unique identifier of the agent.</param>
+    /// <param name="userId">The unique identifier of the user.</param>
+    /// <param name="sessionTitle">Optional title for the new session.</param>
+    /// <returns>The unique identifier of the newly created session.</returns>
+    public async Task<string> CreateNewChatSessionForUserAsync(Guid agentId, Guid userId, string? sessionTitle = null) =>
+        await databaseResourceAccess.CreateNewChatSessionForUserAsync(agentId, userId, sessionTitle);
 
     /// <summary>
     /// Closes an active chat session.
@@ -366,7 +412,8 @@ public class ChatService(
             Content = chatMessage.Content,
             Role = UserRole,
             AgentId = chatMessage.AgentId!.Value,
-            SessionId = sessionId
+            SessionId = sessionId,
+            UserId = chatMessage.UserId
         });
     }
 

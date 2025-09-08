@@ -6,4 +6,5 @@ public class ChatMessagePreview
     public DateTime Timestamp { get; set; }
     public bool IsToolExecution { get; set; }
     public string? ToolName { get; set; }
+    public Guid? UserId { get; set; }
 }

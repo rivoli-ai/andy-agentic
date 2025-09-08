@@ -48,6 +48,16 @@ public class ChatMessageEntity
     public Guid? AgentId { get; set; }
 
     /// <summary>
+    ///     Foreign key referencing the user who sent this message.
+    /// </summary>
+    public Guid? UserId { get; set; }
+
+    /// <summary>
+    ///     Navigation property to the user who sent this message.
+    /// </summary>
+    public virtual UserEntity? User { get; set; }
+
+    /// <summary>
     ///     Number of tokens used in this message, if known.
     /// </summary>
     public int? TokenCount { get; set; }

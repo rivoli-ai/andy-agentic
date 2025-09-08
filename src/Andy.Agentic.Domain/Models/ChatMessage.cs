@@ -17,5 +17,7 @@ public class ChatMessage
 
     public bool IsToolExecution { get; set; }
 
+    public Guid? UserId { get; set; }
+
     public List<ToolExecutionLog> ToolResults { get; set; } = new();
 }

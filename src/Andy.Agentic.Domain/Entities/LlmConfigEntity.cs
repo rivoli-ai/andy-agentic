@@ -87,4 +87,19 @@ public class LlmConfigEntity
     ///     UTC timestamp when this configuration was last updated.
     /// </summary>
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
+
+    /// <summary>
+    ///     Foreign key referencing the user who created this LLM configuration.
+    /// </summary>
+    public Guid? CreatedByUserId { get; set; }
+
+    /// <summary>
+    ///     Navigation property to the user who created this LLM configuration.
+    /// </summary>
+    public virtual UserEntity? CreatedByUser { get; set; }
+
+    /// <summary>
+    ///     Indicates whether this LLM configuration is public and visible to all users.
+    /// </summary>
+    public bool IsPublic { get; set; } = false;
 }

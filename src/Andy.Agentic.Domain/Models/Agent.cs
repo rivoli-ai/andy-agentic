@@ -55,6 +55,16 @@ public class Agent
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
 
     /// <summary>
+    ///     Gets or sets the ID of the user who created this agent.
+    /// </summary>
+    public Guid? CreatedByUserId { get; set; }
+
+    /// <summary>
+    ///     Gets or sets whether this agent is public and visible to all users.
+    /// </summary>
+    public bool IsPublic { get; set; } = false;
+
+    /// <summary>
     ///     Gets or sets the ID of the associated LLM configuration.
     /// </summary>
     public Guid LlmConfigId { get; set; }

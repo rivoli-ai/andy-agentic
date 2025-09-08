@@ -58,4 +58,15 @@ public interface IAgentRepository : IBaseRepository<AgentEntity>
     ///     Retrieves an agent including its LLM configuration.
     /// </summary>
     Task<AgentEntity?> GetWithConfigAsync(Guid id);
+
+    /// <summary>
+    ///     Retrieves agents visible to the specified user.
+    ///     Returns public agents and agents created by the user.
+    /// </summary>
+    Task<IEnumerable<AgentEntity>> GetVisibleAsync(Guid userId);
+
+    /// <summary>
+    ///     Retrieves a specific agent by ID if it's visible to the specified user.
+    /// </summary>
+    Task<AgentEntity?> GetVisibleByIdAsync(Guid id, Guid userId);
 }

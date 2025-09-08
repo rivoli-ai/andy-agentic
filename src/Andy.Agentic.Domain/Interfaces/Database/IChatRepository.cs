@@ -63,11 +63,26 @@ public interface IChatRepository
     /// </summary>
     Task<IEnumerable<ChatMessageEntity>> GetHistoryBySessionId(string sessionId);
 
+    /// <summary>
+    ///     Gets chat history for a specific agent, filtered by user.
+    /// </summary>
+    Task<IEnumerable<ChatMessageEntity>> GetHistoryForUserAsync(Guid? agentId, Guid userId);
+
+    /// <summary>
+    ///     Gets chat history for a specific session, filtered by user.
+    /// </summary>
+    Task<IEnumerable<ChatMessageEntity>> GetHistoryBySessionForUserAsync(string sessionId, Guid userId);
+
     // New methods for chat management
     /// <summary>
     ///     Creates and returns a new session identifier for the given agent.
     /// </summary>
     Task<string> CreateNewSessionAsync(Guid agentId, string? sessionTitle = null);
+
+    /// <summary>
+    ///     Creates and returns a new session identifier for the given agent and user.
+    /// </summary>
+    Task<string> CreateNewSessionForUserAsync(Guid agentId, Guid userId, string? sessionTitle = null);
 
     /// <summary>
     ///     Closes a session and prevents further messages.

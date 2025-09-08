@@ -156,5 +156,35 @@ namespace Andy.Agentic.Infrastructure.Repositories.Database
                 .ThenInclude(at => at.Tool)
                 .FirstOrDefaultAsync(a => a.Id == id);
         }
+
+        public async Task<IEnumerable<AgentEntity>> GetVisibleAsync(Guid userId)
+        {
+            return await context.Agents
+                .Include(a => a.LlmConfig)
+                .Include(a => a.AgentTags)
+                .ThenInclude(at => at.Tag)
+                .Include(a => a.Prompts)
+                .Include(a => a.Tools)
+                .ThenInclude(at => at.Tool)
+                .Where(a => a.IsPublic || a.CreatedByUserId == userId)
+                .OrderBy(a => a.Name)
+                .AsNoTracking()
+                .ToListAsync();
+        }
+
+        public async Task<AgentEntity?> GetVisibleByIdAsync(Guid id, Guid userId)
+        {
+            return await context.Agents
+                .Include(a => a.LlmConfig)
+                .Include(a => a.AgentTags)
+                .ThenInclude(at => at.Tag)
+                .Include(a => a.Prompts)
+                .Include(a => a.Tools)
+                .ThenInclude(at => at.Tool)
+                .Include(a => a.McpServers)
+                .Where(a => a.Id == id && (a.IsPublic || a.CreatedByUserId == userId))
+                .AsNoTracking()
+                .FirstOrDefaultAsync();
+        }
     }
 }

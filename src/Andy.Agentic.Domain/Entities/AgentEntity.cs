@@ -56,6 +56,21 @@ public class AgentEntity
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
 
     /// <summary>
+    ///     Foreign key referencing the user who created this agent.
+    /// </summary>
+    public Guid? CreatedByUserId { get; set; }
+
+    /// <summary>
+    ///     Navigation property to the user who created this agent.
+    /// </summary>
+    public virtual UserEntity? CreatedByUser { get; set; }
+
+    /// <summary>
+    ///     Indicates whether this agent is public and visible to all users.
+    /// </summary>
+    public bool IsPublic { get; set; } = false;
+
+    /// <summary>
     ///     Foreign key referencing the associated LLM configuration.
     /// </summary>
     public Guid LlmConfigId { get; set; }

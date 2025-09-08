@@ -37,7 +37,7 @@ public class PromptDto
     /// <summary>
     ///     Gets or sets the ID of the agent this prompt belongs to.
     /// </summary>
-    public Guid AgentId { get; set; }
+    public Guid? AgentId { get; set; }
 
     /// <summary>
     ///     Gets or sets the collection of variables associated with this prompt.

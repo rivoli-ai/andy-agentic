@@ -22,10 +22,41 @@ namespace Andy.Agentic.Infrastructure.Data
         public DbSet<ToolEntity> Tools { get; set; }
         public DbSet<ChatMessageEntity> ChatMessages { get; set; }
         public DbSet<ToolExecutionLogEntity> ToolExecutionLogs { get; set; }
+        public DbSet<UserEntity> Users { get; set; }
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
             base.OnModelCreating(modelBuilder);
+
+            // User entity configuration
+            modelBuilder.Entity<UserEntity>()
+                .HasIndex(u => u.AzureAdId)
+                .IsUnique();
+
+            modelBuilder.Entity<UserEntity>()
+                .HasIndex(u => u.Email)
+                .IsUnique();
+
+            // Agent entity configuration
+            modelBuilder.Entity<AgentEntity>()
+                .HasOne(a => a.CreatedByUser)
+                .WithMany(u => u.Agents)
+                .HasForeignKey(a => a.CreatedByUserId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            // Tool entity configuration
+            modelBuilder.Entity<ToolEntity>()
+                .HasOne(t => t.CreatedByUser)
+                .WithMany(u => u.Tools)
+                .HasForeignKey(t => t.CreatedByUserId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            // LlmConfig entity configuration
+            modelBuilder.Entity<LlmConfigEntity>()
+                .HasOne(l => l.CreatedByUser)
+                .WithMany(u => u.LlmConfigs)
+                .HasForeignKey(l => l.CreatedByUserId)
+                .OnDelete(DeleteBehavior.Restrict);
 
             modelBuilder.Entity<AgentEntity>()
                 .HasOne(a => a.LlmConfig)
@@ -74,10 +105,22 @@ namespace Andy.Agentic.Infrastructure.Data
                 .HasForeignKey(cm => cm.AgentId)
                 .OnDelete(DeleteBehavior.SetNull);
 
+            modelBuilder.Entity<ChatMessageEntity>()
+                .HasOne(cm => cm.User)
+                .WithMany(u => u.ChatMessages)
+                .HasForeignKey(cm => cm.UserId)
+                .OnDelete(DeleteBehavior.SetNull);
+
             modelBuilder.Entity<ToolExecutionLogEntity>()
                 .HasOne(tel => tel.Agent)
                 .WithMany()
                 .HasForeignKey(tel => tel.AgentId)
+                .OnDelete(DeleteBehavior.SetNull);
+
+            modelBuilder.Entity<ToolExecutionLogEntity>()
+                .HasOne(tel => tel.User)
+                .WithMany(u => u.ToolExecutions)
+                .HasForeignKey(tel => tel.UserId)
                 .OnDelete(DeleteBehavior.SetNull);
 
             modelBuilder.Entity<AgentEntity>()

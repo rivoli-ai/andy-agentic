@@ -69,6 +69,18 @@ public class DatabaseService(
         return mapper.Map<IEnumerable<Agent>>(agents);
     }
 
+    public async Task<IEnumerable<Agent>> GetVisibleAgentsAsync(Guid userId)
+    {
+        var agents = await agentRepository.GetVisibleAsync(userId);
+        return mapper.Map<IEnumerable<Agent>>(agents);
+    }
+
+    public async Task<Agent?> GetVisibleAgentByIdAsync(Guid id, Guid userId)
+    {
+        var agent = await agentRepository.GetVisibleByIdAsync(id, userId);
+        return agent != null ? mapper.Map<Agent>(agent) : null;
+    }
+
     public async Task<IEnumerable<Tool>> GetAllToolsAsync()
     {
         var tools = await toolRepository.GetAllAsync();
@@ -271,6 +283,19 @@ public class DatabaseService(
         return summary;
     }
 
+    // User-specific Chat History Management
+    public async Task<IEnumerable<ChatHistory>> GetChatHistoryForUserAsync(Guid agentId, Guid userId)
+    {
+        var messages = await chatRepository.GetHistoryForUserAsync(agentId, userId);
+        return mapper.Map<IEnumerable<ChatHistory>>(messages);
+    }
+
+    public async Task<IEnumerable<ChatHistory>> GetChatHistoryBySessionForUserAsync(string sessionId, Guid userId)
+    {
+        var messages = await chatRepository.GetHistoryBySessionForUserAsync(sessionId, userId);
+        return mapper.Map<IEnumerable<ChatHistory>>(messages);
+    }
+
     // Chat Sessions Management
     public async Task<IEnumerable<ChatSession>> GetChatSessionsAsync(Guid? agentId = null)
     {
@@ -323,6 +348,61 @@ public class DatabaseService(
         return session ?? new ChatSession();
     }
 
+    public async Task<IEnumerable<ChatSession>> GetChatSessionsForUserAsync(Guid? agentId, Guid userId)
+    {
+        var messages = await chatRepository.GetHistoryForUserAsync(agentId, userId);
+        var messageList = messages.ToList();
+
+        var sessions = messageList
+            .Where(ch => !string.IsNullOrEmpty(ch.SessionId))
+            .GroupBy(ch => ch.SessionId)
+            .Select(g => new ChatSession
+            {
+                SessionId = g.Key,
+                AgentId = g.First().AgentId ?? Guid.Empty,
+                AgentName = g.First().AgentName ?? string.Empty,
+                StartedAt = g.Min(ch => ch.Timestamp),
+                LastActivityAt = g.Max(ch => ch.Timestamp),
+                MessageCount = g.Count(),
+                TotalTokens = g.Sum(ch => ch.TokenCount ?? 0),
+                IsActive = g.Max(ch => ch.Timestamp) > DateTime.UtcNow.AddHours(-1),
+                Description = g.Where(ch => ch.Role == "user").OrderBy(ch => ch.Timestamp).FirstOrDefault()?.Content
+            })
+            .OrderByDescending(s => s.LastActivityAt)
+            .ToList();
+
+        return sessions;
+    }
+
+    public async Task<ChatSession?> GetChatSessionForUserAsync(string sessionId, Guid userId)
+    {
+        var messages = await chatRepository.GetHistoryBySessionForUserAsync(sessionId, userId);
+        var messageList = messages.ToList();
+
+        if (!messageList.Any())
+        {
+            return null;
+        }
+
+        var session = messageList
+            .GroupBy(ch => ch.SessionId)
+            .Select(g => new ChatSession
+            {
+                SessionId = g.Key,
+                AgentId = g.First().AgentId ?? Guid.Empty,
+                AgentName = g.First().AgentName ?? string.Empty,
+                StartedAt = g.Min(ch => ch.Timestamp),
+                LastActivityAt = g.Max(ch => ch.Timestamp),
+                MessageCount = g.Count(),
+                TotalTokens = g.Sum(ch => ch.TokenCount ?? 0),
+                IsActive = g.Max(ch => ch.Timestamp) > DateTime.UtcNow.AddHours(-1),
+                Description = g.Where(ch => ch.Role == "user").OrderBy(ch => ch.Timestamp).FirstOrDefault()?.Content
+            })
+            .FirstOrDefault();
+
+        return session;
+    }
+
     public async Task<ChatSessionSummary> GetChatSessionSummaryAsync(string sessionId)
     {
         var session = await GetChatSessionAsync(sessionId);
@@ -364,6 +444,9 @@ public class DatabaseService(
 
     public async Task<string> CreateNewChatSessionAsync(Guid agentId, string? sessionTitle = null) =>
         await chatRepository.CreateNewSessionAsync(agentId, sessionTitle);
+
+    public async Task<string> CreateNewChatSessionForUserAsync(Guid agentId, Guid userId, string? sessionTitle = null) =>
+        await chatRepository.CreateNewSessionForUserAsync(agentId, userId, sessionTitle);
 
     public async Task<bool> CloseChatSessionAsync(string sessionId) =>
         await chatRepository.CloseSessionAsync(sessionId);

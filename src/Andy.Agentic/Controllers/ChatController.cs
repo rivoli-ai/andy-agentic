@@ -5,6 +5,7 @@ using Andy.Agentic.Application.DTOs;
 using Andy.Agentic.Application.Interfaces;
 using AutoMapper;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Authorization;
 
 namespace Andy.Agentic.Controllers;
 
@@ -13,7 +14,8 @@ namespace Andy.Agentic.Controllers;
 /// </summary>
 [ApiController]
 [Route("api/[controller]")]
-public class ChatController(IChatService chatService, IMapper mapper) : ControllerBase
+[Authorize]
+public class ChatController(IChatService chatService, IMapper mapper, IAuthService authService) : ControllerBase
 {
     /// <summary>
     ///     Sends a message to an agent and streams the response back in real-time using Server-Sent Events.
@@ -32,7 +34,23 @@ public class ChatController(IChatService chatService, IMapper mapper) : Controll
 
         try
         {
-            await foreach (var chunk in chatService.GetMessageStreamAsync(mapper.Map<ChatMessage>(chatMessage)))
+            // Get the current user and set the UserId
+            var currentUser = await authService.GetCurrentUserAsync();
+            if (currentUser == null)
+            {
+                var errorJson = JsonSerializer.Serialize(new
+                {
+                    error = new { message = "User not authenticated", type = "auth_error" }
+                });
+                await Response.WriteAsync($"data: {errorJson}\n\n", Encoding.UTF8);
+                await Response.Body.FlushAsync();
+                return;
+            }
+
+            var mappedMessage = mapper.Map<ChatMessage>(chatMessage);
+            mappedMessage.UserId = currentUser.Id;
+
+            await foreach (var chunk in chatService.GetMessageStreamAsync(mappedMessage))
             {
                 var jsonResponse = JsonSerializer.Serialize(chunk,
                     new JsonSerializerOptions { Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping });
@@ -54,17 +72,23 @@ public class ChatController(IChatService chatService, IMapper mapper) : Controll
     }
 
     /// <summary>
-    ///     Retrieves the chat history for a specific agent.
+    ///     Retrieves the chat history for a specific agent, filtered by current user.
     /// </summary>
     /// <param name="agentId">The unique identifier of the agent.</param>
-    /// <returns>A list of chat history entries for the agent.</returns>
+    /// <returns>A list of chat history entries for the agent and current user.</returns>
     // GET: api/chat/history/{agentId}
     [HttpGet("history/{agentId}")]
     public async Task<ActionResult<IEnumerable<ChatHistoryDto>>> GetChatHistory(Guid agentId)
     {
         try
         {
-            var history = await chatService.GetChatHistoryAsync(agentId);
+            var currentUser = await authService.GetCurrentUserAsync();
+            if (currentUser == null)
+            {
+                return Unauthorized(new { error = "User not authenticated" });
+            }
+
+            var history = await chatService.GetChatHistoryForUserAsync(agentId, currentUser.Id);
             return Ok(history);
         }
         catch (Exception ex)
@@ -74,10 +98,10 @@ public class ChatController(IChatService chatService, IMapper mapper) : Controll
     }
 
     /// <summary>
-    ///     Retrieves all chat sessions, optionally filtered by agent.
+    ///     Retrieves all chat sessions for the current user, optionally filtered by agent.
     /// </summary>
     /// <param name="agentId">Optional agent identifier to filter sessions.</param>
-    /// <returns>A list of chat session summaries.</returns>
+    /// <returns>A list of chat session summaries for the current user.</returns>
     // GET: api/chat/sessions
     [HttpGet("sessions")]
     public async Task<ActionResult<IEnumerable<ChatSessionSummaryDto>>> GetChatSessions(
@@ -85,7 +109,13 @@ public class ChatController(IChatService chatService, IMapper mapper) : Controll
     {
         try
         {
-            var sessions = await chatService.GetChatSessionsAsync(agentId);
+            var currentUser = await authService.GetCurrentUserAsync();
+            if (currentUser == null)
+            {
+                return Unauthorized(new { error = "User not authenticated" });
+            }
+
+            var sessions = await chatService.GetChatSessionsForUserAsync(agentId, currentUser.Id);
             return Ok(sessions);
         }
         catch (Exception ex)
@@ -95,7 +125,7 @@ public class ChatController(IChatService chatService, IMapper mapper) : Controll
     }
 
     /// <summary>
-    ///     Retrieves details of a specific chat session.
+    ///     Retrieves details of a specific chat session if owned by current user.
     /// </summary>
     /// <param name="sessionId">The unique identifier of the session.</param>
     /// <returns>The chat session details.</returns>
@@ -105,7 +135,17 @@ public class ChatController(IChatService chatService, IMapper mapper) : Controll
     {
         try
         {
-            var session = await chatService.GetChatSessionAsync(sessionId);
+            var currentUser = await authService.GetCurrentUserAsync();
+            if (currentUser == null)
+            {
+                return Unauthorized(new { error = "User not authenticated" });
+            }
+
+            var session = await chatService.GetChatSessionForUserAsync(sessionId, currentUser.Id);
+            if (session == null)
+            {
+                return NotFound(new { error = "Session not found or not accessible" });
+            }
 
             return Ok(session);
         }
@@ -116,7 +156,7 @@ public class ChatController(IChatService chatService, IMapper mapper) : Controll
     }
 
     /// <summary>
-    ///     Retrieves chat history for a specific session.
+    ///     Retrieves chat history for a specific session if owned by current user.
     /// </summary>
     /// <param name="sessionId">The unique identifier of the session.</param>
     /// <returns>A list of chat history entries for the session.</returns>
@@ -126,7 +166,13 @@ public class ChatController(IChatService chatService, IMapper mapper) : Controll
     {
         try
         {
-            var history = await chatService.GetChatHistoryBySessionAsync(sessionId);
+            var currentUser = await authService.GetCurrentUserAsync();
+            if (currentUser == null)
+            {
+                return Unauthorized(new { error = "User not authenticated" });
+            }
+
+            var history = await chatService.GetChatHistoryBySessionForUserAsync(sessionId, currentUser.Id);
             return Ok(history);
         }
         catch (Exception ex)
@@ -166,8 +212,14 @@ public class ChatController(IChatService chatService, IMapper mapper) : Controll
     {
         try
         {
-            var sessionId = await chatService.CreateNewChatSessionAsync(request.AgentId, request.Title);
-            var sessionDto = await chatService.GetChatSessionAsync(sessionId);
+            var currentUser = await authService.GetCurrentUserAsync();
+            if (currentUser == null)
+            {
+                return Unauthorized(new { error = "User not authenticated" });
+            }
+
+            var sessionId = await chatService.CreateNewChatSessionForUserAsync(request.AgentId, currentUser.Id, request.Title);
+            var sessionDto = await chatService.GetChatSessionForUserAsync(sessionId, currentUser.Id);
             return Ok(sessionDto);
         }
         catch (Exception ex)

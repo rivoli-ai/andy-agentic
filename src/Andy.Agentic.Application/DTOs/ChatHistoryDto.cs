@@ -19,7 +19,7 @@ public class ChatHistoryDto
     public bool IsToolExecution { get; set; }
     public string? ToolName { get; set; }
     public string? ToolResult { get; set; }
-
+    public Guid? UserId { get; set; }
 
     public List<ToolExecutionLogDto> ToolResults { get; set; } = new();
 }

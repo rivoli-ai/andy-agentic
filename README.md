@@ -28,6 +28,8 @@ Andy Agentic provides a unified web-based interface for orchestrating AI agents 
 - **Web-Based Interface**: Modern, responsive UI for configuring and managing agents
 - **Agent Orchestration**: Create complex multi-agent workflows
 - **Real-time Monitoring**: Track agent activities and performance
+- **Microsoft Entra Authentication**: Secure authentication with Azure AD integration
+- **User Management**: Multi-user support with user-specific data isolation
 - **Extensible Architecture**: Plugin system for custom integrations
 - **Streaming Chat**: Real-time streaming responses with OpenAI-compatible format
 - **Tool Execution**: Dynamic tool calling and execution framework
@@ -55,6 +57,8 @@ Andy Agentic provides a unified web-based interface for orchestrating AI agents 
 ### Option 2: Local Development
 - .NET 9.0 SDK or later
 - MySQL Server 8.0 or later
+- Node.js 18+ and npm (for frontend)
+- Azure AD tenant (for authentication)
 - A modern web browser
 
 ## Getting Started
@@ -82,6 +86,16 @@ The application will be available at:
 - **HTTP**: `http://localhost`
 - **HTTPS**: `https://localhost` (if SSL is configured)
 - **API Documentation**: `http://localhost/swagger`
+
+### Authentication Setup
+
+Andy Agentic now includes Microsoft Entra (Azure AD) authentication. Before running the application, you need to configure authentication:
+
+1. **Set up Azure AD App Registrations** (see [AUTHENTICATION_SETUP.md](AUTHENTICATION_SETUP.md))
+2. **Configure environment variables** with your Azure AD credentials
+3. **Run database migrations** to add user tables
+
+For detailed setup instructions, see [AUTHENTICATION_SETUP.md](AUTHENTICATION_SETUP.md).
 
 #### Docker Commands
 
