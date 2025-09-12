@@ -29,3 +29,4 @@ public interface IUserRepository : IBaseRepository<UserEntity>
     Task<bool> ExistsByEmailAsync(string email);
 }
 
+

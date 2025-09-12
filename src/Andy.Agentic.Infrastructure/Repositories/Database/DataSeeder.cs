@@ -1,4 +1,5 @@
 using Andy.Agentic.Domain.Entities;
+using Andy.Agentic.Domain.Models;
 using Andy.Agentic.Infrastructure.Data;
 
 namespace Andy.ResourceAccess.DataBase
@@ -122,7 +123,7 @@ namespace Andy.ResourceAccess.DataBase
                 BaseUrl = "https://llm.chutes.ai/v1",
                 ApiKey = "cpk_404ed9acdd22472b9ad442a02d087c6b.096d8916f7885e649eb1257ef96180ef.NHt5GJ6aXkQF26MujuC6UCKzIZvgrAbu",
                 Model = "Qwen/Qwen3-Coder-30B-A3B-Instruct",
-                Provider = "openai",
+                Provider =  LLMProviderType.OpenAi,
                 IsActive = true,
                 MaxTokens = 4000,
                 Temperature = 0.7,

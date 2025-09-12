@@ -16,5 +16,10 @@ public interface ILlmService
 
     Task<LlmRequest> PrepareLlmMessageAsync(Agent agent, Prompt prompt,
         string userMessage, string sessionId, List<ChatHistory> getChatHistoryFunc);
-    IAsyncEnumerable<StreamingResult> SendToLlmProviderStreamAsync(LlmConfig llmConfig, LlmRequest request);
+
+    IAsyncEnumerable<StreamingResult> SendToLlmProviderStreamAsync(
+        Agent agent,
+        LlmRequest request,
+        string session,
+        ToolExecutionRecorder toolExecutionRecorder);
 }

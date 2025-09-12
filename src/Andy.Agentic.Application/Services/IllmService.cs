@@ -5,6 +5,7 @@ using Andy.Agentic.Domain.Entities;
 using Andy.Agentic.Domain.Interfaces;
 using Andy.Agentic.Domain.Interfaces.Database;
 using Andy.Agentic.Domain.Interfaces.Llm;
+using Andy.Agentic.Domain.Interfaces.Llm.Semantic;
 using Andy.Agentic.Domain.Models;
 using AutoMapper;
 
@@ -14,7 +15,7 @@ namespace Andy.Agentic.Application.Services;
 ///     Service for managing Large Language Model (LLM) configurations, providers, and interactions.
 ///     Handles CRUD operations for LLM configs, provider information, and message processing.
 /// </summary>
-public class LlmService(ILlmRepository llmRepository, ILlmProviderFactory providerFactory, IMapper mapper) : ILlmService
+public class LlmService(ILlmRepository llmRepository, ILlmProviderFactory providerFactory, IMapper mapper, ISemanticKernelBuilder semenSemanticKernelBuilder) : ILlmService
 {
     /// <summary>
     ///     Retrieves all LLM configurations from the repository.
@@ -106,7 +107,7 @@ public class LlmService(ILlmRepository llmRepository, ILlmProviderFactory provid
         {
             new()
             {
-                Id = "openai",
+                Id = LLMProviderType.OpenAi.ToString().ToLowerInvariant(),
                 Name = "OpenAI",
                 BaseUrl = "https://api.openai.com/v1",
                 Models = new List<string> { "gpt-4", "gpt-4-turbo", "gpt-3.5-turbo", "gpt-3.5-turbo-16k" },
@@ -114,7 +115,7 @@ public class LlmService(ILlmRepository llmRepository, ILlmProviderFactory provid
             },
             new()
             {
-                Id = "anthropic",
+                Id = LLMProviderType.Anthropic.ToString().ToLowerInvariant(),
                 Name = "Anthropic",
                 BaseUrl = "https://api.anthropic.com",
                 Models = new List<string> { "claude-3-opus", "claude-3-sonnet", "claude-3-haiku" },
@@ -122,7 +123,7 @@ public class LlmService(ILlmRepository llmRepository, ILlmProviderFactory provid
             },
             new()
             {
-                Id = "google",
+                Id = LLMProviderType.Google.ToString().ToLowerInvariant(),
                 Name = "Google",
                 BaseUrl = "https://generativelanguage.googleapis.com",
                 Models = new List<string> { "gemini-pro", "gemini-pro-vision" },
@@ -130,7 +131,7 @@ public class LlmService(ILlmRepository llmRepository, ILlmProviderFactory provid
             },
             new()
             {
-                Id = "custom",
+                Id = LLMProviderType.Custom.ToString().ToLowerInvariant(),
                 Name = "Custom LLM",
                 BaseUrl = "",
                 Models = new List<string>(),
@@ -138,7 +139,7 @@ public class LlmService(ILlmRepository llmRepository, ILlmProviderFactory provid
             },
             new()
             {
-                Id = "ollama",
+                Id = LLMProviderType.Ollama.ToString().ToLowerInvariant(),
                 Name = "Ollama (Local)",
                 BaseUrl = "http://localhost:11434",
                 Models = new List<string>
@@ -154,6 +155,14 @@ public class LlmService(ILlmRepository llmRepository, ILlmProviderFactory provid
                     "codellama:34b"
                 },
                 IsOpenAiCompatible = false
+            },
+            new()
+            {
+                Id = LLMProviderType.AzureOpenAi.ToString().ToLowerInvariant(),
+                Name = "Azure OpenAI",
+                BaseUrl = "https://your-resource.openai.azure.com/",
+                Models = new List<string> { "gpt-4", "gpt-4-turbo", "gpt-3.5-turbo" },
+                IsOpenAiCompatible = true
             }
         };
 
@@ -187,20 +196,18 @@ public class LlmService(ILlmRepository llmRepository, ILlmProviderFactory provid
         string sessionId,
         List<ChatHistory> recentMessages)
     {
-        // Get all available tools from the agent
         var allTools = BuilolsFromAgent(agent);
         
-        // Filter out tools that were executed and succeeded in the last message
-        var filteredTools = FilterToolsBasedOnLastExecution(allTools, recentMessages);
+        var tools = agent.Tools.Select(at => at.Tool).ToList();
 
         recentMessages.Add( new ChatHistory{Role = "system", Content = prompt.Content });
 
         Console.WriteLine($"Session ID: {sessionId}");
         Console.WriteLine($"Chat History Count: {recentMessages.Count}");
         Console.WriteLine($"Total Tools Available: {allTools.Count}");
-        Console.WriteLine($"Tools After Filtering: {filteredTools.Count}");
+        Console.WriteLine($"Tools After Filtering: {tools.Count}");
 
-        return  new LlmRequest {Messages = recentMessages, Tools = filteredTools};
+        return  new LlmRequest {Messages = recentMessages, Tools = tools! };
     }
 
     /// <summary>
@@ -211,16 +218,20 @@ public class LlmService(ILlmRepository llmRepository, ILlmProviderFactory provid
     /// <param name="tools">Optional list of tools available to the LLM.</param>
     /// <param name="toolCalls">Optional list of previous tool calls for context.</param>
     /// <returns>An async enumerable of response chunks from the LLM provider.</returns>
-    public async IAsyncEnumerable<StreamingResult> SendToLlmProviderStreamAsync(LlmConfig llmConfig, LlmRequest request)
+    public async IAsyncEnumerable<StreamingResult> SendToLlmProviderStreamAsync(Agent agent,
+        LlmRequest request,
+        string session,
+        ToolExecutionRecorder toolExecutionRecorder)
     {
-        var provider = providerFactory.GetProvider(llmConfig.Provider);
-
-        var config = mapper.Map<LlmConfig>(llmConfig);
-
-      
-        await foreach (var chunk in provider.StreamChatWithTools(config, request.Messages, request.Tools))
+        var kernel = semenSemanticKernelBuilder.BuildKernelAsync(agent, session, agent.LlmConfig, request, toolExecutionRecorder);
+        await foreach (var chunk in semenSemanticKernelBuilder.CallAgentAsync(kernel))
         {
-            yield return chunk!;
+            yield return new StreamingResult
+                {
+                    Content = chunk.Content,
+                }
+                ;
+
         }
 
     }
@@ -240,7 +251,9 @@ public class LlmService(ILlmRepository llmRepository, ILlmProviderFactory provid
             using var httpClient = new HttpClient();
             httpClient.Timeout = TimeSpan.FromSeconds(10);
 
-            if (testConnection.Provider == "openai" || testConnection.Provider == "custom")
+            if (testConnection.Provider == LLMProviderType.OpenAi || 
+                testConnection.Provider == LLMProviderType.Custom ||
+                testConnection.Provider == LLMProviderType.AzureOpenAi)
             {
                 var requestBody = new
                 {
@@ -277,7 +290,7 @@ public class LlmService(ILlmRepository llmRepository, ILlmProviderFactory provid
                 };
             }
 
-            if (testConnection.Provider == "ollama")
+            if (testConnection.Provider == LLMProviderType.Ollama)
             {
                 var requestBody = new
                 {

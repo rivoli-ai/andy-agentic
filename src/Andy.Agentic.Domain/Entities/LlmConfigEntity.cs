@@ -1,4 +1,5 @@
 using System.ComponentModel.DataAnnotations;
+using Andy.Agentic.Domain.Models;
 
 namespace Andy.Agentic.Domain.Entities;
 
@@ -42,11 +43,10 @@ public class LlmConfigEntity
     public string Model { get; set; } = string.Empty;
 
     /// <summary>
-    ///     Provider name (e.g., openai, ollama).
+    ///     Provider type.
     /// </summary>
     [Required]
-    [MaxLength(50)]
-    public string Provider { get; set; } = string.Empty;
+    public LLMProviderType Provider { get; set; }
 
     /// <summary>
     ///     Flag indicating whether this configuration is active.

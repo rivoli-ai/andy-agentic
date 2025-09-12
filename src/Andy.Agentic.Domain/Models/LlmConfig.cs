@@ -42,11 +42,10 @@ public class LlmConfig
     public string Model { get; set; } = string.Empty;
 
     /// <summary>
-    ///     Gets or sets the provider name (e.g., "openai", "ollama").
+    ///     Gets or sets the provider type.
     /// </summary>
     [Required]
-    [MaxLength(50)]
-    public string Provider { get; set; } = string.Empty;
+    public LLMProviderType Provider { get; set; }
 
     /// <summary>
     ///     Gets or sets whether this LLM configuration is currently active.

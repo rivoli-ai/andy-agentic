@@ -1,0 +1,1 @@
+namespace Andy.Agentic.Domain.Models.Semantic;/// <summary>/// Enumeration representing different AI providers./// </summary>public enum AiProvider{     /// <summary>    /// None Enum    /// </summary>    None,    /// <summary>    /// OpenAi Enum    /// </summary>    OpenAi,    /// <summary>    /// Azure OpenAi Enum    /// </summary>    AzureOpenAi,}

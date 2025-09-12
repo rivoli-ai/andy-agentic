@@ -9,13 +9,14 @@ using Andy.Agentic.Infrastructure.Mapping;
 using Andy.Agentic.Infrastructure.Repositories;
 using Andy.Agentic.Infrastructure.Repositories.Database;
 using Andy.Agentic.Infrastructure.Repositories.Llm;
+using Andy.Agentic.Infrastructure.Semantic;
 using Andy.Agentic.Infrastructure.Services;
 using Andy.Agentic.Infrastructure.Services.ToolProviders;
 using Andy.Agentic.Infrastructure.UnitOfWorks;
 using Andy.ResourceAccess.DataBase;
+using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Identity.Web;
-using Microsoft.AspNetCore.Authentication.JwtBearer;
 
 namespace Andy.Agentic;
 
@@ -51,6 +52,7 @@ public class Startup
         ConfigureCoreServices(services);
         ConfigureHttpClient(services);
         ConfigureToolProviders(services);
+        services.AddSemanticKernelBuilder();
     }
 
     /// <summary>

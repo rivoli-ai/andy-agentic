@@ -80,35 +80,19 @@ public class ChatService(
     {
         var recentMessages = await databaseResourceAccess.GetChatHistoryBySessionAsync(sessionId);
 
-        var chatRequest = await llmResourceAccess.PrepareLlmMessageAsync(agent, activePrompt,
-            messageContent, sessionId,
-            recentMessages.ToList());
+        var chatRequest = await llmResourceAccess.PrepareLlmMessageAsync(agent, activePrompt, messageContent, sessionId,recentMessages.ToList());
 
         var responseContent = new List<string?>();
-        var toolsToCall = new List<ToolCall?>();
+        var recorder = new ToolExecutionRecorder();
 
-        await foreach (var chunk in llmResourceAccess.SendToLlmProviderStreamAsync( agent.LlmConfig!, chatRequest))
+        await foreach (var chunk in llmResourceAccess.SendToLlmProviderStreamAsync(agent, chatRequest, sessionId, recorder))
         {
             responseContent.Add(chunk.Content);
-
-            if (chunk.ToolCalls != null)
-            {
-                toolsToCall.AddRange(chunk.ToolCalls);
-            }
             yield return chunk.Content!;
         }
 
-        await SaveAssistantMessageAsync(agent, sessionId, responseContent, toolResults ?? new List<ToolExecutionLog>());
+        await SaveAssistantMessageAsync(agent, sessionId, responseContent, recorder.Records.ToList());
 
-        if (!toolsToCall.Any())
-        {
-            yield break;
-        }
-
-        await foreach (var chunk in ProcessToolCallsAsync(agent, activePrompt, sessionId, toolsToCall, chatRequest))
-        {
-            yield return chunk;
-        }
     }
 
     /// <summary>
