@@ -17,6 +17,6 @@ public sealed class DataModel
     [VectorStoreData]
     public required string SourceLink { get; init; }
 
-    [VectorStoreVector(1536)]
+    [VectorStoreVector(4096)]
     public string Embedding => this.Text;
 }

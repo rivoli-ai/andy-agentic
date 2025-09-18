@@ -129,7 +129,7 @@ public class Startup
 
         services.AddSingleton(sp =>
         {
-            NpgsqlDataSourceBuilder dataSourceBuilder = new(_configuration.GetConnectionString("VectorDb"));
+            NpgsqlDataSourceBuilder dataSourceBuilder = new(_configuration.GetConnectionString("DefaultConnection"));
             dataSourceBuilder.UseVector();
             return dataSourceBuilder.Build();
         });

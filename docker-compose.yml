@@ -1,27 +1,27 @@
 services:
-  # MySQL Database - Same as development (uses public image)
-  mysql:
-    image: mysql:8.0
-    container_name: ${MYSQL_CONTAINER_NAME:-agentic-mysql}
+  # PostgreSQL Database with pgvector extension
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: ${POSTGRES_CONTAINER_NAME:-agentic-postgres}
     restart: unless-stopped
     environment:
-      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
-      MYSQL_DATABASE: ${MYSQL_DATABASE}
-      MYSQL_USER: ${MYSQL_USER}
-      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
-      MYSQL_ROOT_HOST: '%'
+      POSTGRES_DB: ${POSTGRES_DATABASE:-agentic_db}
+      POSTGRES_USER: ${POSTGRES_USER:-agentic_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-agentic_password}
+      POSTGRES_INITDB_ARGS: "--encoding=UTF-8 --lc-collate=C --lc-ctype=C"
     ports:
-      - "${MYSQL_PORT:-3306}:3306"
+      - "${POSTGRES_PORT:-5432}:5432"
     volumes:
-      - mysql_data:/var/lib/mysql
-      - ./mysql/init:/docker-entrypoint-initdb.d
+      - postgres_data:/var/lib/postgresql/data
+      - ./postgres/init:/docker-entrypoint-initdb.d
     networks:
       - agentic-network
     healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-agentic_user} -d ${POSTGRES_DATABASE:-agentic_db}"]
       timeout: 20s
       retries: 10
-    command: --default-authentication-plugin=mysql_native_password --innodb-buffer-pool-size=${MYSQL_BUFFER_POOL_SIZE:-256M} --bind-address=0.0.0.0
+      interval: 10s
+      start_period: 30s
 
   # .NET Application - Uses pre-built image instead of building
   agentic-backend:
@@ -35,9 +35,9 @@ services:
     environment:
       ASPNETCORE_ENVIRONMENT: ${ASPNETCORE_ENVIRONMENT:-Production}
       ASPNETCORE_URLS: http://0.0.0.0:80
-      ConnectionStrings__DefaultConnection: Server=mysql;Database=${MYSQL_DATABASE:-agentic_db};User=${MYSQL_USER};Password=${MYSQL_PASSWORD};Port=3306
+      ConnectionStrings__DefaultConnection: Host=postgres;Database=${POSTGRES_DATABASE:-agentic_db};Username=${POSTGRES_USER:-agentic_user};Password=${POSTGRES_PASSWORD:-agentic_password};Port=5432;Include Error Detail=true
     depends_on:
-      mysql:
+      postgres:
         condition: service_healthy
     networks:
       - agentic-network
@@ -51,7 +51,7 @@ services:
       start_period: 40s
 
 volumes:
-  mysql_data:
+  postgres_data:
 
 networks:
   agentic-network:

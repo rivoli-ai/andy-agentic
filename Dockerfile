@@ -14,7 +14,7 @@ COPY ["src/Andy.Agentic.Application/Andy.Agentic.Application.csproj", "src/Andy.
 COPY ["src/Andy.Agentic.Domain/Andy.Agentic.Domain.csproj", "src/Andy.Agentic.Domain/"]
 COPY ["src/Andy.Agentic.Infrastructure/Andy.Agentic.Infrastructure.csproj", "src/Andy.Agentic.Infrastructure/"]
 
-# Restore dependencies
+# Restore dependencies 
 RUN dotnet restore "src/Andy.Agentic/Andy.Agentic.csproj"
 
 # Copy all source code
