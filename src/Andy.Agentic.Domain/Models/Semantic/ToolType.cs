@@ -11,7 +11,12 @@ public enum ToolType
     ApiTool,
 
     /// <summary>
-    /// ApiTool Enum
+    /// McpTool Enum
     /// </summary>
-    McpTool
+    McpTool,
+
+    /// <summary>
+    /// InternalTool Enum - Simple internal tools with no parameters
+    /// </summary>
+    InternalTool
 }

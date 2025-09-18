@@ -10,6 +10,7 @@ public interface IToolManager{
     /// Asynchronously adds a list of tool configurations to the specified kernel.
     /// </summary>
     /// <param name="kernel">The kernel to which the tools will be added.</param>
+    /// <param name="agent"></param>
     /// <param name="tools">A list of tool configurations to be added to the kernel.</param>
     /// <returns>A task representing the asynchronous operation.</returns>
-    void AddToolsAsync(Kernel kernel, List<Tool> tools);}
+    void AddToolsAsync(Kernel kernel, Agent agent, List<Tool> tools);}

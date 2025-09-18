@@ -1,15 +1,7 @@
-using System.Text.Json;using Microsoft.SemanticKernel;using ModelContextProtocol.Client;using ModelContextProtocol.Protocol;using IMcpClient = ModelContextProtocol.Client.IMcpClient;using Tool = Andy.Agentic.Domain.Models.Tool;namespace Andy.Agentic.Infrastructure.Semantic.Tools;/// <summary>
+using System.Text.Json;using Andy.Agentic.Domain.Models;using Microsoft.SemanticKernel;using ModelContextProtocol.Client;using ModelContextProtocol.Protocol;using IMcpClient = ModelContextProtocol.Client.IMcpClient;using Tool = Andy.Agentic.Domain.Models.Tool;namespace Andy.Agentic.Infrastructure.Semantic.Tools;/// <summary>
 /// Represents a factory for creating instances of MCP tools.
 /// </summary>
-public class McpToolFactory : ToolFactory{
-    /// <summary>
-    /// Creates a tool asynchronously using the provided tool configuration.
-    /// </summary>
-    /// <param name="tool">The tool configuration object containing details such as name, description, parameters, and authentication.</param>
-    /// <returns>
-    /// A KernelFunction object representing the created tool, which includes the method to call the tool dynamically and its metadata.
-    /// </returns>
-    public override KernelFunction CreateToolAsync(Tool tool)    {        IEnumerable<KernelParameterMetadata>? parameters = null;        async Task<string> DynamicMcpCall(KernelArguments args)        {
+public class McpToolFactory : ToolFactory{    /// <summary>    /// Creates a tool asynchronously using the provided tool configuration.    /// </summary>    /// <param name="agent"></param>    /// <param name="tool">The tool configuration object containing details such as name, description, parameters, and authentication.</param>    /// <returns>    /// A KernelFunction object representing the created tool, which includes the method to call the tool dynamically and its metadata.    /// </returns>    public override KernelFunction CreateToolAsync(Agent agent, Tool tool)    {        IEnumerable<KernelParameterMetadata>? parameters = null;        async Task<string> DynamicMcpCall(KernelArguments args)        {
             var configuration = ParseConfiguration(tool.Configuration);            var headers = ParseHeaders(tool.Headers);
 
             var endpoint = GetRequiredConfigValue<string>(configuration, "endpoint");            var mcpType = GetConfigValue(configuration, "mcpType", "stdio");            var workingDirectory = GetConfigValue<string>(configuration, "workingDirectory", null!);

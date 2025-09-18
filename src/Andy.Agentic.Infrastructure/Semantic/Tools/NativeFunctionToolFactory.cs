@@ -1,5 +1,7 @@
+using System.Diagnostics.CodeAnalysis;
 using Andy.Agentic.Domain.Interfaces.Llm.Semantic;
 using Andy.Agentic.Domain.Models;
+using Andy.Agentic.Infrastructure.Semantic.Tools.Internal;
 using Microsoft.Extensions.Logging;
 using Microsoft.SemanticKernel;
 
@@ -8,35 +10,68 @@ namespace Andy.Agentic.Infrastructure.Semantic.Tools;
 public class NativeFunctionToolFactory : IToolFactory
 {
     private readonly ILogger<NativeFunctionToolFactory>? _logger;
+    private readonly DocumentRagServiceTool _documentRagServiceTool;
 
-    public NativeFunctionToolFactory(ILogger<NativeFunctionToolFactory>? logger = null)
+    public NativeFunctionToolFactory(
+        DocumentRagServiceTool documentRagServiceTool,
+        ILogger<NativeFunctionToolFactory>? logger = null)
     {
+        _documentRagServiceTool = documentRagServiceTool;
         _logger = logger;
     }
-
-    public KernelFunction CreateToolAsync(Tool config)
+    [Experimental("SKEXP0130")]
+    public KernelFunction CreateToolAsync(Agent agent, Tool tool)
     {
         try
         {
-            // Load assembly and create function from native method
-            //var assembly = System.Reflection.Assembly.LoadFrom(config.NativeFunctionAssembly!);
-            //var type = assembly.GetType(config.NativeFunctionType!)!;
-            //var instance = Activator.CreateInstance(type);
+            _logger?.LogInformation("Creating native function tool: {ToolName}", tool.Name);
 
-            //var function = KernelFunctionFactory.CreateFromMethod(
-            //    type.GetMethod(config.NativeFunctionMethod!)!,
-            //    instance,
-            //    config.Name,
-            //    config.Description);
-
-            //return Task.FromResult(function);
-
-            throw new NotImplementedException();
+            return tool.Name.ToLowerInvariant() switch
+            {
+                "search" => CreateSearchTool(agent, tool),
+                _ => CreateGenericNativeTool(tool)
+            };
         }
         catch (Exception ex)
         {
-            _logger?.LogError(ex, "Error creating native function tool: {ToolName}", config.Name);
+            _logger?.LogError(ex, "Error creating native function tool: {ToolName}", tool.Name);
             throw;
         }
+    }
+
+    /// <summary>
+    /// Creates a search tool function using DocumentRagServiceTool.
+    /// </summary>
+    /// <param name="agent"></param>
+    /// <param name="config">The tool configuration.</param>
+    /// <returns>A KernelFunction for document search.</returns>
+    [Experimental("SKEXP0130")]
+    private KernelFunction CreateSearchTool(Agent agent, Tool config)
+    {
+        _logger?.LogInformation("Creating Search tool with DocumentRagService functionality");
+
+        return KernelFunctionFactory.CreateFromMethod(
+            async (string query) => 
+                await _documentRagServiceTool.SearchDocumentsAsync(query, agent),
+            functionName: config.Name,
+            description: config.Description
+        );
+    }
+
+    /// <summary>
+    /// Creates a generic native tool function for unknown tool names.
+    /// </summary>
+    /// <param name="config">The tool configuration.</param>
+    /// <returns>A KernelFunction representing a generic native tool.</returns>
+    private KernelFunction CreateGenericNativeTool(Tool config)
+    {
+        _logger?.LogInformation("Creating generic native tool: {ToolName}", config.Name);
+
+        // For now, return a simple function that indicates the tool is not implemented
+        return KernelFunctionFactory.CreateFromMethod(
+            method: () => Task.FromResult($"Native tool '{config.Name}' is not yet implemented."),
+            functionName: config.Name,
+            description: config.Description
+        );
     }
 }

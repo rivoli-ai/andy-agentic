@@ -8,6 +8,7 @@ public interface IToolFactory{
     /// <summary>
     /// Asynchronously creates a tool based on the provided configuration.
     /// </summary>
+    /// <param name="agent"></param>
     /// <param name="config">The configuration settings for the tool.</param>
     /// <returns>A task representing the asynchronous operation, containing the created kernel function.</returns>
-    KernelFunction CreateToolAsync(Tool config);}
+    KernelFunction CreateToolAsync(Agent agent, Tool config);}

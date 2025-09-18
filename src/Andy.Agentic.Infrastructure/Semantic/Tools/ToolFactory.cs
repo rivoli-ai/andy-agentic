@@ -300,7 +300,8 @@ public abstract class ToolFactory : IToolFactory
     /// <summary>
     /// Creates a tool asynchronously based on the provided configuration.
     /// </summary>
+    /// <param name="agent"></param>
     /// <param name="config">The configuration settings for the tool.</param>
     /// <returns>A task that represents the asynchronous operation, containing the created KernelFunction.</returns>
-    public abstract KernelFunction CreateToolAsync(Tool config);
+    public abstract KernelFunction CreateToolAsync(Agent agent, Tool config);
 }

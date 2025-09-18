@@ -14,11 +14,25 @@ public sealed class FunctionInterceptorFilter(ToolExecutionRecorder recorder,  
     /// </returns>
     public async Task OnFunctionInvocationAsync(
             FunctionInvocationContext context,
-            Func<FunctionInvocationContext, Task> next)    {        var tool = tools.FirstOrDefault(x => x.Name == context.Function.PluginName);        var rec = new ToolExecutionLog        {            Id = Guid.NewGuid(),            ToolId = tool!.Id,            ToolName = tool.Name,            AgentId = agent.Id,            SessionId = session,            Parameters = SerializeArguments(context.Arguments)!,            ExecutedAt = DateTime.UtcNow,        };        try        {            await next(context); 
+            Func<FunctionInvocationContext, Task> next)    {        var tool = tools.FirstOrDefault(x => x.Name == context.Function.Name);        var rec = new ToolExecutionLog        {            Id = Guid.NewGuid(),            AgentId = agent.Id,            ToolName = context.Function.Name,            SessionId = session,            Parameters = SerializeArguments(context.Arguments)!,            ExecutedAt = DateTime.UtcNow,        };        if (tool != null)        {            rec.ToolId = tool.Id;            rec.ToolName = tool.Name;        }
+
+        try
+        {
+            await next(context);
             rec.Success = true;
             var resultObj = context.Result.GetValue<object>();
-            rec.Result = resultObj is string s ? s : JsonSerializer.Serialize(resultObj);        }        catch (Exception ex)        {            rec.Success = false;            rec.ErrorMessage = ex.ToString();            throw; 
-        }        finally        {            recorder.Add(rec);        }    }
+            rec.Result = resultObj is string s ? s : JsonSerializer.Serialize(resultObj);
+        }
+        catch (Exception ex)
+        {
+            rec.Success = false;
+            rec.ErrorMessage = ex.ToString();
+            throw;
+        }
+        finally
+        {
+            recorder.Add(rec);
+        }    }
 
     /// <summary>
     /// Serializes the given KernelArguments into a dictionary where the keys are strings and the values are objects.

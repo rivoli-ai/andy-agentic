@@ -23,6 +23,8 @@ namespace Andy.Agentic.Infrastructure.Data
         public DbSet<ChatMessageEntity> ChatMessages { get; set; }
         public DbSet<ToolExecutionLogEntity> ToolExecutionLogs { get; set; }
         public DbSet<UserEntity> Users { get; set; }
+        public DbSet<DocumentEntity> Documents { get; set; }
+        public DbSet<AgentDocumentEntity> AgentDocuments { get; set; }
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
@@ -62,6 +64,12 @@ namespace Andy.Agentic.Infrastructure.Data
                 .HasOne(a => a.LlmConfig)
                 .WithMany() 
                 .HasForeignKey(a => a.LlmConfigId);
+
+            modelBuilder.Entity<AgentEntity>()
+                .HasOne(a => a.EmbeddingLlmConfig)
+                .WithMany()
+                .HasForeignKey(a => a.EmbeddingLlmConfigId)
+                .OnDelete(DeleteBehavior.SetNull);
 
             modelBuilder.Entity<PromptEntity>()
                 .HasOne(p => p.Agent)
@@ -127,6 +135,13 @@ namespace Andy.Agentic.Infrastructure.Data
                 .HasIndex(a => a.Name)
                 .IsUnique();
 
+            // Agent-Documents relationship configuration
+            modelBuilder.Entity<AgentEntity>()
+                .HasMany(a => a.AgentDocuments)
+                .WithOne(ad => ad.Agent)
+                .HasForeignKey(ad => ad.AgentId)
+                .OnDelete(DeleteBehavior.Cascade);
+
             modelBuilder.Entity<TagEntity>()
                 .HasIndex(t => t.Name)
                 .IsUnique();
@@ -145,6 +160,35 @@ namespace Andy.Agentic.Infrastructure.Data
 
             modelBuilder.Entity<AgentToolEntity>()
                 .HasKey(at => new { at.AgentId, at.ToolId });
+
+            // Document entity configuration
+            modelBuilder.Entity<DocumentEntity>()
+                .HasOne(d => d.CreatedByUser)
+                .WithMany()
+                .HasForeignKey(d => d.CreatedByUserId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            // Configure BinaryContent as LONGBLOB for MySQL
+            modelBuilder.Entity<DocumentEntity>()
+                .Property(d => d.BinaryContent)
+                .HasColumnType("LONGBLOB");
+
+            // AgentDocument entity configuration
+            modelBuilder.Entity<AgentDocumentEntity>()
+                .HasOne(ad => ad.Agent)
+                .WithMany(a => a.AgentDocuments)
+                .HasForeignKey(ad => ad.AgentId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            modelBuilder.Entity<AgentDocumentEntity>()
+                .HasOne(ad => ad.Document)
+                .WithMany(d => d.AgentDocuments)
+                .HasForeignKey(ad => ad.DocumentId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            modelBuilder.Entity<AgentDocumentEntity>()
+                .HasIndex(ad => new { ad.AgentId, ad.DocumentId })
+                .IsUnique();
 
         }
     }

@@ -1,15 +1,18 @@
+using System.Diagnostics.CodeAnalysis;
 using Andy.Agentic.Application.Interfaces;
 using Andy.Agentic.Application.Mapping;
 using Andy.Agentic.Application.Services;
 using Andy.Agentic.Domain.Interfaces;
 using Andy.Agentic.Domain.Interfaces.Database;
 using Andy.Agentic.Domain.Interfaces.Llm;
+using Andy.Agentic.Domain.Interfaces.Llm.Semantic;
 using Andy.Agentic.Infrastructure.Data;
 using Andy.Agentic.Infrastructure.Mapping;
 using Andy.Agentic.Infrastructure.Repositories;
 using Andy.Agentic.Infrastructure.Repositories.Database;
 using Andy.Agentic.Infrastructure.Repositories.Llm;
 using Andy.Agentic.Infrastructure.Semantic;
+using Andy.Agentic.Infrastructure.Semantic.Provider;
 using Andy.Agentic.Infrastructure.Services;
 using Andy.Agentic.Infrastructure.Services.ToolProviders;
 using Andy.Agentic.Infrastructure.UnitOfWorks;
@@ -17,6 +20,7 @@ using Andy.ResourceAccess.DataBase;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Identity.Web;
+using Npgsql;
 
 namespace Andy.Agentic;
 
@@ -43,6 +47,7 @@ public class Startup
     ///     Configures the application services.
     /// </summary>
     /// <param name="services">The service collection to configure.</param>
+    [Experimental("SKEXP0001")]
     public void ConfigureApplicationServices(IServiceCollection services)
     {
         ConfigureWebServices(services);
@@ -75,6 +80,9 @@ public class Startup
         services.AddControllers();
         services.AddEndpointsApiExplorer();
         services.AddSwaggerGen();
+        
+        // Add SignalR for real-time notifications
+        services.AddSignalR();
 
         // Add JWT Bearer authentication for Microsoft Graph tokens
         services.AddAuthentication("Bearer")
@@ -112,13 +120,21 @@ public class Startup
     ///     Configures database-related services and connection.
     /// </summary>
     /// <param name="services">The service collection to configure.</param>
-    private void ConfigureDatabase(IServiceCollection services) =>
+    private void ConfigureDatabase(IServiceCollection services)
+    {
         services.AddDbContext<AndyDbContext>(options =>
-            options.UseMySql(
-                _configuration.GetConnectionString("DefaultConnection"),
-                ServerVersion.AutoDetect(_configuration.GetConnectionString("DefaultConnection"))
+            options.UseNpgsql(
+                _configuration.GetConnectionString("DefaultConnection")
             ));
 
+        services.AddSingleton(sp =>
+        {
+            NpgsqlDataSourceBuilder dataSourceBuilder = new(_configuration.GetConnectionString("VectorDb"));
+            dataSourceBuilder.UseVector();
+            return dataSourceBuilder.Build();
+        });
+    }
+      
     /// <summary>
     ///     Configures AutoMapper profiles.
     /// </summary>
@@ -145,7 +161,8 @@ public class Startup
         services.AddScoped<IMcpRepository, McpRepository>();
         services.AddScoped<IPromptRepository, PromptRepository>();
         services.AddScoped<IUserRepository, UserRepository>();
-
+        services.AddScoped<IDocumentRepository, DocumentRepository>();
+        services.AddScoped<IAgentDocumentRepository, AgentDocumentRepository>();
         // LLM Provider Repositories
         services.AddScoped<ILLmProviderRepository, OpenAiRepository>();
         services.AddScoped<ILLmProviderRepository, OllamaRepository>();
@@ -159,6 +176,7 @@ public class Startup
     ///     Configures core application services.
     /// </summary>
     /// <param name="services">The service collection to configure.</param>
+    [Experimental("SKEXP0001")]
     private void ConfigureCoreServices(IServiceCollection services)
     {
         // Core Services
@@ -169,7 +187,15 @@ public class Startup
         services.AddScoped<IChatService, ChatService>();
         services.AddScoped<ITagService, TagService>();
         services.AddScoped<IAgentService, AgentService>();
-        
+        services.AddScoped<IMcpService, McpService>();
+        services.AddScoped<IDocumentService, DocumentService>();
+        services.AddScoped<IDocumentRagProvider, DocumentRagProvider>();
+        services.AddSingleton<DocumentRagBackgroundService>();
+        services.AddSingleton<IDocumentRagBackgroundService>(provider => 
+            provider.GetRequiredService<DocumentRagBackgroundService>());
+        services.AddHostedService<DocumentRagBackgroundService>(provider => 
+            provider.GetRequiredService<DocumentRagBackgroundService>());
+
         // Authentication Services
         services.AddScoped<IAuthService, AuthService>();
         services.AddHttpContextAccessor();
@@ -214,6 +240,7 @@ public class Startup
         app.UseAuthentication(); // Add this before UseAuthorization
         app.UseAuthorization();
         app.MapControllers();
+        app.MapHub<Andy.Agentic.Infrastructure.Semantic.DocumentRagHub>("/documentRagHub");
     }
 
     /// <summary>
@@ -225,6 +252,5 @@ public class Startup
         using var scope = app.Services.CreateScope();
         var context = scope.ServiceProvider.GetRequiredService<AndyDbContext>();
         context.Database.Migrate();
-        //DatabaseSeeder.SeedData(context);
     }
 }

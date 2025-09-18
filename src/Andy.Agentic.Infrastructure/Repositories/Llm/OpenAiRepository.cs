@@ -8,6 +8,7 @@ using System.Text;
 using System.Text.Encodings.Web;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using Microsoft.Extensions.AI;
 
 namespace Andy.Agentic.Infrastructure.Repositories.Llm;
 
@@ -254,6 +255,8 @@ public class OpenAiRepository : ILLmProviderRepository
 
         return new OpenAIClient(new ApiKeyCredential(config.ApiKey), clientOptions);
     }
+
+    
 
     /// <summary>
     /// Creates chat completion options with the specified configuration and tools.

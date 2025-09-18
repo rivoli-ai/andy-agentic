@@ -23,6 +23,7 @@ public class EntityMapperProfile : Profile
     private void Map()
     {
         CreateMap<AgentEntity, Agent>()
+            .ForMember(dest => dest.AgentDocuments, opt => opt.MapFrom(src => src.AgentDocuments))
             .ReverseMap();
 
         CreateMap<LlmConfigEntity, LlmConfig>()
@@ -57,8 +58,13 @@ public class EntityMapperProfile : Profile
 
         CreateMap<AgentTagEntity, AgentTag>()
             .ReverseMap();
-
         CreateMap<AgentMcpServerEntity, AgentMcpServer>()
+            .ReverseMap();
+
+        CreateMap<DocumentEntity, Document>()
+            .ReverseMap();
+
+        CreateMap<AgentDocumentEntity, AgentDocument>()
             .ReverseMap();
 
         CreateMap<ChatHistoryEntity, ChatHistory>()

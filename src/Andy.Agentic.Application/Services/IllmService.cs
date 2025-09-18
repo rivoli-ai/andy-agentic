@@ -200,8 +200,6 @@ public class LlmService(ILlmRepository llmRepository, ILlmProviderFactory provid
         
         var tools = agent.Tools.Select(at => at.Tool).ToList();
 
-        recentMessages.Add( new ChatHistory{Role = "system", Content = prompt.Content });
-
         Console.WriteLine($"Session ID: {sessionId}");
         Console.WriteLine($"Chat History Count: {recentMessages.Count}");
         Console.WriteLine($"Total Tools Available: {allTools.Count}");
@@ -226,11 +224,7 @@ public class LlmService(ILlmRepository llmRepository, ILlmProviderFactory provid
         var kernel = semenSemanticKernelBuilder.BuildKernelAsync(agent, session, agent.LlmConfig, request, toolExecutionRecorder);
         await foreach (var chunk in semenSemanticKernelBuilder.CallAgentAsync(kernel))
         {
-            yield return new StreamingResult
-                {
-                    Content = chunk.Content,
-                }
-                ;
+            yield return new StreamingResult { Content = chunk.Content };
 
         }
 

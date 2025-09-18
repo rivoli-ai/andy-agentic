@@ -1,4 +1,5 @@
 using Andy.Agentic.Domain.Models;
+using Microsoft.Extensions.AI;
 
 namespace Andy.Agentic.Domain.Interfaces.Llm;
 

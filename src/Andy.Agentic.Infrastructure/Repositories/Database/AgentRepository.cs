@@ -26,10 +26,13 @@ namespace Andy.Agentic.Infrastructure.Repositories.Database
                 Includes = 
             {
                 q => q.Include(o => o.LlmConfig),
+                q => q.Include(o => o.EmbeddingLlmConfig),
                 q => q.Include(o => o.AgentTags).ThenInclude(t=>t.Tag),
                 q => q.Include(o => o.Prompts),
                 q => q.Include(o => o.Tools),
                 q => q.Include(o => o.McpServers),
+                q => q.Include(o => o.AgentDocuments)
+                    .ThenInclude(ad => ad.Document),
             }
             };
 
@@ -49,6 +52,7 @@ namespace Andy.Agentic.Infrastructure.Repositories.Database
                 Includes =
                 {
                     q => q.Include(o => o.LlmConfig),
+                    q => q.Include(o => o.EmbeddingLlmConfig),
                     q => q.Include(o => o.AgentTags)
                         .ThenInclude(t=>t.Tag),
                     q => q.Include(o => o.Prompts)
@@ -56,6 +60,8 @@ namespace Andy.Agentic.Infrastructure.Repositories.Database
                     q => q.Include(o => o.Tools)
                         .ThenInclude(t=>t.Tool),
                     q => q.Include(o => o.McpServers),
+                    q => q.Include(o => o.AgentDocuments)
+                        .ThenInclude(ad => ad.Document),
                 }
             };
 
@@ -161,12 +167,15 @@ namespace Andy.Agentic.Infrastructure.Repositories.Database
         {
             return await context.Agents
                 .Include(a => a.LlmConfig)
+                .Include(a => a.EmbeddingLlmConfig)
                 .Include(a => a.AgentTags)
                 .ThenInclude(at => at.Tag)
                 .Include(a => a.Prompts)
                 .Include(a => a.Tools)
                 .ThenInclude(at => at.Tool)
                 .Where(a => a.IsPublic || a.CreatedByUserId == userId)
+                .Include(at => at.AgentDocuments)
+                .ThenInclude(d => d.Document)
                 .OrderBy(a => a.Name)
                 .AsNoTracking()
                 .ToListAsync();
@@ -176,12 +185,15 @@ namespace Andy.Agentic.Infrastructure.Repositories.Database
         {
             return await context.Agents
                 .Include(a => a.LlmConfig)
+                .Include(a=>a.EmbeddingLlmConfig)
                 .Include(a => a.AgentTags)
                 .ThenInclude(at => at.Tag)
                 .Include(a => a.Prompts)
                 .Include(a => a.Tools)
                 .ThenInclude(at => at.Tool)
                 .Include(a => a.McpServers)
+                .Include(at => at.AgentDocuments)
+                .ThenInclude(d=>d.Document)
                 .Where(a => a.Id == id && (a.IsPublic || a.CreatedByUserId == userId))
                 .AsNoTracking()
                 .FirstOrDefaultAsync();

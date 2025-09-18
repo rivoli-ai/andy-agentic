@@ -11,7 +11,7 @@ namespace Andy.Agentic.Controllers;
 /// </summary>
 [ApiController]
 [Route("api/[controller]")]
-public class ToolsController(IToolService toolService, IMapper mapper) : ControllerBase
+public class ToolsController(IToolService toolService, IMapper mapper, IMcpService mcpService) : ControllerBase
 {
     /// <summary>
     ///     Retrieves all available tools.
@@ -213,6 +213,63 @@ public class ToolsController(IToolService toolService, IMapper mapper) : Control
         {
             var tools = await toolService.GetActiveToolsAsync();
             return Ok(tools);
+        }
+        catch (Exception ex)
+        {
+            return StatusCode(500, new { error = "Internal server error", message = ex.Message });
+        }
+    }
+
+    /// <summary>
+    ///     Discovers tools from an MCP server at the specified URL.
+    /// </summary>
+    /// <param name="url">The URL of the MCP server.</param>
+    /// <returns>A list of discovered tools from the MCP server.</returns>
+    [HttpGet("discover-mcp")]
+    public async Task<ActionResult<McpToolDiscoveryResponse>> DiscoverMcpTools([FromQuery] string url)
+    {
+        try
+        {
+            if (string.IsNullOrWhiteSpace(url))
+            {
+                return BadRequest(new { error = "URL is required" });
+            }
+
+            var response = await mcpService.DiscoverToolsAsync(url);
+            return Ok(response);
+        }
+        catch (Exception ex)
+        {
+            return StatusCode(500, new { error = "Internal server error", message = ex.Message });
+        }
+    }
+
+    /// <summary>
+    ///     Discovers tools from an MCP server and returns them as Tool entities.
+    /// </summary>
+    /// <param name="request">The MCP discovery request containing the server URL.</param>
+    /// <returns>A list of Tool entities discovered from the MCP server.</returns>
+    [HttpPost("discover-mcp-tools")]
+    public async Task<ActionResult<IEnumerable<ToolDto>>> DiscoverMcpToolsAsEntities([FromBody] McpDiscoveryRequest request)
+    {
+        try
+        {
+            if (string.IsNullOrWhiteSpace(request.Url))
+            {
+                return BadRequest(new { error = "URL is required" });
+            }
+
+            var response = await mcpService.DiscoverToolsAsync(request.Url);
+            
+            if (!response.Success)
+            {
+                return BadRequest(new { error = "MCP discovery failed", message = response.Error });
+            }
+
+            var tools = response.Tools.Select(mcpTool => mcpService.ConvertToTool(mcpTool, request.Url));
+            var toolDtos = tools.Select(tool => mapper.Map<ToolDto>(tool));
+
+            return Ok(toolDtos);
         }
         catch (Exception ex)
         {

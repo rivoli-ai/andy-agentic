@@ -3,6 +3,7 @@ using System.Text.Encodings.Web;
 using System.Text.Json;
 using Andy.Agentic.Domain.Interfaces.Llm;
 using Andy.Agentic.Domain.Models;
+using Microsoft.Extensions.AI;
 
 namespace Andy.Agentic.Infrastructure.Repositories.Llm;
 
@@ -28,6 +29,8 @@ public class OllamaRepository(HttpClient httpClient) : ILLmProviderRepository
     {
         return provider.Equals("ollama", StringComparison.OrdinalIgnoreCase);
     }
+
+    public IEmbeddingGenerator CreateEmbeddingClient(LlmConfig config) => throw new NotImplementedException();
 
     public async IAsyncEnumerable<string> SendMessageStreamAsync(
         LlmConfig llmConfig,

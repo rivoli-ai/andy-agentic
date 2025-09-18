@@ -46,6 +46,10 @@ public class DtosMapperProfile : Profile
 
         CreateMap<AgentMcpServer, AgentMcpServerDto>().ReverseMap();
 
+        CreateMap<Document, DocumentDto>().ReverseMap();
+
+        CreateMap<AgentDocument, AgentDocumentDto>().ReverseMap();
+
         CreateMap<ChatHistory, ChatHistoryDto>().ReverseMap();
 
         CreateMap<ChatMessage, ChatHistoryDto>().ReverseMap();

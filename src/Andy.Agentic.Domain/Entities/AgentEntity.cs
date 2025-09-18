@@ -81,6 +81,16 @@ public class AgentEntity
     public virtual LlmConfigEntity? LlmConfig { get; set; } = null!;
 
     /// <summary>
+    ///     Foreign key referencing the associated embedding LLM configuration for RAG.
+    /// </summary>
+    public Guid? EmbeddingLlmConfigId { get; set; }
+
+    /// <summary>
+    ///     Navigation property to the embedding LLM configuration used for RAG.
+    /// </summary>
+    public virtual LlmConfigEntity? EmbeddingLlmConfig { get; set; }
+
+    /// <summary>
     ///     Collection of prompts associated with this agent.
     /// </summary>
     public virtual ICollection<PromptEntity> Prompts { get; set; } = new List<PromptEntity>();
@@ -99,4 +109,9 @@ public class AgentEntity
     ///     Collection of tags assigned to this agent.
     /// </summary>
     public virtual ICollection<AgentTagEntity> AgentTags { get; set; } = new List<AgentTagEntity>();
+
+    /// <summary>
+    ///     Collection of documents associated with this agent.
+    /// </summary>
+    public virtual ICollection<AgentDocumentEntity> AgentDocuments { get; set; } = new List<AgentDocumentEntity>();
 }
