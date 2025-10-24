@@ -1,28 +1,14 @@
-using Andy.Agentic.Application.Interfaces;
-using Andy.Agentic.Domain.Interfaces;
 using Andy.Agentic.Domain.Interfaces.Llm.Semantic;
 using Andy.Agentic.Domain.Models;
 using Andy.Agentic.Domain.Models.Semantic;
 using Andy.Agentic.Infrastructure.Semantic.Interceptor;
-using Azure.AI.OpenAI;
-using Microsoft.Extensions.AI;
-using Microsoft.Extensions.AI;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.VectorData;
-using Microsoft.SemanticKernel;
 using Microsoft.SemanticKernel;
 using Microsoft.SemanticKernel.Agents;
-using Microsoft.SemanticKernel.Agents;
-using Microsoft.SemanticKernel.Connectors.InMemory;
-using Microsoft.SemanticKernel.Connectors.InMemory;
 using Microsoft.SemanticKernel.Connectors.OpenAI;
-using Microsoft.SemanticKernel.Data;
-using Microsoft.SemanticKernel.Data;
-using OpenAI;
-using System.ClientModel;
 using System.Diagnostics.CodeAnalysis;
-using System.Threading;
+using System.Runtime.CompilerServices;
 using Agent = Andy.Agentic.Domain.Models.Agent;
 
 namespace Andy.Agentic.Infrastructure.Semantic.Builder;
@@ -36,7 +22,6 @@ public class SemanticKernelBuilder : ISemanticKernelBuilder
     private readonly IProviderDetector _providerDetector;
     private readonly IAiServiceFactory _aiServiceFactory;
     private readonly IToolManager _toolManager;
-    private readonly IDocumentRagProvider _documentRagService;
     private readonly ILogger<SemanticKernelBuilder>? _logger;
 
     /// <summary>
@@ -45,19 +30,16 @@ public class SemanticKernelBuilder : ISemanticKernelBuilder
     /// <param name="providerDetector">The provider detector used to identify the AI service provider.</param>
     /// <param name="aiServiceFactory">The factory used to create AI services.</param>
     /// <param name="toolManager">The manager responsible for handling tools.</param>
-    /// <param name="documentRagService">The document RAG service for retrieval augmented generation.</param>
     /// <param name="logger">Optional logger for logging information.</param>
     public SemanticKernelBuilder(
             IProviderDetector providerDetector,
             IAiServiceFactory aiServiceFactory,
             IToolManager toolManager,
-            IDocumentRagProvider documentRagService,
             ILogger<SemanticKernelBuilder>? logger = null)
     {
         _providerDetector = providerDetector;
         _aiServiceFactory = aiServiceFactory;
         _toolManager = toolManager;
-        _documentRagService = documentRagService;
         _logger = logger;
     }
 
@@ -72,16 +54,32 @@ public class SemanticKernelBuilder : ISemanticKernelBuilder
     [Experimental("SKEXP0130")]
     public async IAsyncEnumerable<StreamingChatMessageContent> CallAgentAsync(KernelResponse query)
     {
+        await foreach (var item in CallAgentAsync(query, CancellationToken.None))
+        {
+            yield return item;
+        }
+    }
+
+    /// <summary>
+    /// Calls the agent asynchronously and streams chat message content.
+    /// Intercepts streaming responses to detect function calls.
+    /// </summary>
+    /// <param name="query">The kernel response containing chat history and kernel information.</param>
+    /// <param name="cancellationToken">Cancellation token to stop the streaming operation.</param>
+    /// <returns>
+    /// An asynchronous stream of <see cref="StreamingChatMessageContent"/> representing the agent's responses.
+    /// </returns>
+    [Experimental("SKEXP0130")]
+    public async IAsyncEnumerable<StreamingChatMessageContent> CallAgentAsync(KernelResponse query, [EnumeratorCancellation] CancellationToken cancellationToken)
+    {
         AgentThread thread = new ChatHistoryAgentThread(chatHistory: query.ChatHistory);
 
 
-        if (query.Agent?.AgentDocuments?.Any() == true && query.Agent.EmbeddingLlmConfig != null)
+        if (query.Agent?.AgentDocuments.Any() == true && query.Agent.EmbeddingLlmConfig != null)
         {
             try
             {
-                //var textSearchProvider = await _documentRagService.GetTextSearchProviderAsync(query.Agent);
-          
-                //thread.AIContextProviders.Add(textSearchProvider);
+              
                 _logger?.LogInformation("RAG provider added to agent thread for agent {AgentId}", query.Agent.Id);
             }
             catch (Exception ex)
@@ -89,7 +87,7 @@ public class SemanticKernelBuilder : ISemanticKernelBuilder
                 _logger?.LogWarning(ex, "Failed to add RAG provider for agent {AgentId}", query.Agent.Id);
             }
         }
-
+        var hastTools = query.Agent?.Tools.Any() ?? false;
 
         ChatCompletionAgent agent =
             new()
@@ -97,12 +95,12 @@ public class SemanticKernelBuilder : ISemanticKernelBuilder
                 Name = "agent",
                 Kernel = query.Kernel,
 
-                Arguments = new KernelArguments(
+                Arguments = hastTools ? new KernelArguments(
                     new OpenAIPromptExecutionSettings()
                     {
                         FunctionChoiceBehavior = FunctionChoiceBehavior.Auto(),
-                    }),
-                UseImmutableKernel = true
+                    }) : null,
+                UseImmutableKernel = hastTools
             };
 
         var prompt = string.Join("\n", query.Agent?.Prompts.Select(p=>p.Content) ?? []);

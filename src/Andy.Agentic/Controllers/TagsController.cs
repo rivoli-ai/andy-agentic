@@ -2,6 +2,7 @@ using Andy.Agentic.Application.DTOs;
 using Andy.Agentic.Application.Interfaces;
 using Andy.Agentic.Domain.Models;
 using AutoMapper;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Andy.Agentic.Controllers;
@@ -11,6 +12,7 @@ namespace Andy.Agentic.Controllers;
 /// </summary>
 [ApiController]
 [Route("api/[controller]")]
+[Authorize]
 public class TagsController : ControllerBase
 {
     private readonly IMapper _mapper;
@@ -79,6 +81,7 @@ public class TagsController : ControllerBase
     /// <returns>The created tag details.</returns>
     // POST: api/tags
     [HttpPost]
+     [Authorize(Policy = "WriteRole")]
     public async Task<ActionResult<TagDto>> CreateTag([FromBody] TagDto createTagDto)
     {
         try
@@ -108,6 +111,7 @@ public class TagsController : ControllerBase
     /// <returns>Success or error response.</returns>
     // PUT: api/tags/{id}
     [HttpPut("{id}")]
+     [Authorize(Policy = "WriteRole")]
     public async Task<IActionResult> UpdateTag(Guid id, [FromBody] TagDto updateTagDto)
     {
         try
@@ -141,6 +145,7 @@ public class TagsController : ControllerBase
     /// <returns>Success or error response.</returns>
     // DELETE: api/tags/{id}
     [HttpDelete("{id}")]
+     [Authorize(Policy = "WriteRole")]
     public async Task<IActionResult> DeleteTag(Guid id)
     {
         try

@@ -191,10 +191,29 @@ public class McpService : IMcpService
     /// <returns>Parsed property definition.</returns>
     private static McpToolProperty ParseProperty(JsonElement propertyElement)
     {
-        var property = new McpToolProperty
+        var property = new McpToolProperty();
+
+
+        if(propertyElement.TryGetProperty("anyOf",out var anyOfElement) && anyOfElement.ValueKind == JsonValueKind.Array)
         {
-            Type = propertyElement.GetProperty("type").GetString() ?? "string"
-        };
+            foreach (var item in anyOfElement.EnumerateArray())
+            {
+                if (item.TryGetProperty("type", out var typeElement))
+                {
+                    property.Type = typeElement.GetString() ?? "string";
+                    break;
+                }
+                else if (item.ValueKind == JsonValueKind.String)
+                {
+                    property.Type = item.GetString() ?? "string";
+                    break;
+                }
+            }
+        }
+        else
+        {
+            property.Type = propertyElement.GetProperty("type").GetString() ?? "string";
+        }
 
         if (propertyElement.TryGetProperty("description", out var descriptionElement))
         {

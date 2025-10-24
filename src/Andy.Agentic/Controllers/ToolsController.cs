@@ -3,6 +3,7 @@ using Andy.Agentic.Application.Interfaces;
 using Andy.Agentic.Domain.Models;
 using AutoMapper;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Authorization;
 
 namespace Andy.Agentic.Controllers;
 
@@ -11,6 +12,7 @@ namespace Andy.Agentic.Controllers;
 /// </summary>
 [ApiController]
 [Route("api/[controller]")]
+[Authorize]
 public class ToolsController(IToolService toolService, IMapper mapper, IMcpService mcpService) : ControllerBase
 {
     /// <summary>
@@ -61,6 +63,7 @@ public class ToolsController(IToolService toolService, IMapper mapper, IMcpServi
     /// <param name="createToolDto">The tool data for creation.</param>
     /// <returns>The created tool details.</returns>
     [HttpPost]
+     [Authorize(Policy = "WriteRole")]
     public async Task<ActionResult<ToolDto>> CreateTool([FromBody] ToolDto createToolDto)
     {
         try
@@ -90,6 +93,7 @@ public class ToolsController(IToolService toolService, IMapper mapper, IMcpServi
     /// <param name="updateToolDto">The updated tool data.</param>
     /// <returns>The updated tool details.</returns>
     [HttpPut("{id}")]
+     [Authorize(Policy = "WriteRole")]
     public async Task<ActionResult<ToolDto>> UpdateTool(Guid id, [FromBody] ToolDto updateToolDto)
     {
         try
@@ -118,6 +122,7 @@ public class ToolsController(IToolService toolService, IMapper mapper, IMcpServi
     /// <param name="id">The unique identifier of the tool to delete.</param>
     /// <returns>Success or error response.</returns>
     [HttpDelete("{id}")]
+     [Authorize(Policy = "WriteRole")]
     public async Task<ActionResult> DeleteTool(Guid id)
     {
         try

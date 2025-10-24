@@ -21,5 +21,6 @@ public interface ILlmService
         Agent agent,
         LlmRequest request,
         string session,
-        ToolExecutionRecorder toolExecutionRecorder);
+        ToolExecutionRecorder toolExecutionRecorder,
+        CancellationToken cancellationToken = default);
 }

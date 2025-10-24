@@ -3,6 +3,7 @@ using Andy.Agentic.Application.Interfaces;
 using Andy.Agentic.Domain.Models;
 using AutoMapper;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Authorization;
 
 namespace Andy.Agentic.Controllers;
 
@@ -11,6 +12,7 @@ namespace Andy.Agentic.Controllers;
 /// </summary>
 [ApiController]
 [Route("api/[controller]")]
+[Authorize]
 public class LlmController(ILlmService llmService, IMapper mapper) : ControllerBase
 {
     /// <summary>
@@ -61,6 +63,7 @@ public class LlmController(ILlmService llmService, IMapper mapper) : ControllerB
     /// <param name="createLlmConfigDto">The LLM configuration data for creation.</param>
     /// <returns>The created LLM configuration details.</returns>
     [HttpPost("configs")]
+     [Authorize(Policy = "WriteRole")]
     public async Task<ActionResult<LlmConfigDto>> CreateLlmConfig([FromBody] LlmConfigDto createLlmConfigDto)
     {
         try
@@ -86,10 +89,10 @@ public class LlmController(ILlmService llmService, IMapper mapper) : ControllerB
     /// <summary>
     ///     Updates an existing LLM configuration.
     /// </summary>
-    /// <param name="id">The unique identifier of the LLM configuration to update.</param>
     /// <param name="updateLlmConfigDto">The updated LLM configuration data.</param>
     /// <returns>The updated LLM configuration details.</returns>
     [HttpPut("configs/{id}")]
+     [Authorize(Policy = "WriteRole")]
     public async Task<ActionResult<LlmConfigDto>> UpdateLlmConfig([FromBody] LlmConfigDto updateLlmConfigDto)
     {
         try
@@ -118,6 +121,7 @@ public class LlmController(ILlmService llmService, IMapper mapper) : ControllerB
     /// <param name="id">The unique identifier of the LLM configuration to delete.</param>
     /// <returns>Success or error response.</returns>
     [HttpDelete("configs/{id}")]
+     [Authorize(Policy = "WriteRole")]
     public async Task<ActionResult> DeleteLlmConfig(Guid id)
     {
         try

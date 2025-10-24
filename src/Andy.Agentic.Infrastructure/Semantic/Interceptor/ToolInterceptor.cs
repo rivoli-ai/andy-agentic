@@ -26,8 +26,7 @@ public sealed class FunctionInterceptorFilter(ToolExecutionRecorder recorder,  
         catch (Exception ex)
         {
             rec.Success = false;
-            rec.ErrorMessage = ex.ToString();
-            throw;
+            rec.ErrorMessage = ex.ToString()[..1000];
         }
         finally
         {

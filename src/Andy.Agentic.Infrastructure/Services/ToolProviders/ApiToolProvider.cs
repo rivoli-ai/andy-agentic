@@ -46,7 +46,7 @@ public class ApiToolProvider(HttpClient httpClient) : IToolProvider
             using var request = new HttpRequestMessage();
             request.Method = GetHttpMethod(method);
 
-            ApplyAuthenticationHeaders(request, auth);
+            await ApplyAuthenticationHeadersAsync(request, auth);
             ApplyCustomHeaders(request, headers);
 
             if (IsGetRequest(method))
@@ -231,9 +231,9 @@ public class ApiToolProvider(HttpClient httpClient) : IToolProvider
     }
 
     /// <summary>
-    /// Applies authentication headers to request based on auth type (Bearer, API Key, Basic).
+    /// Applies authentication headers to request based on auth type (Bearer, API Key, Basic, OAuth2).
     /// </summary>
-    private static void ApplyAuthenticationHeaders(HttpRequestMessage request, Dictionary<string, object> auth)
+    private static async Task ApplyAuthenticationHeadersAsync(HttpRequestMessage request, Dictionary<string, object> auth)
     {
         if (!auth.Any())
         {
@@ -248,7 +248,7 @@ public class ApiToolProvider(HttpClient httpClient) : IToolProvider
         switch (authType.ToString()?.ToLower())
         {
             case "bearer":
-                if (auth.TryGetValue("token", out var token))
+                if (auth.TryGetValue("apiKey", out var token) || auth.TryGetValue("token", out token))
                 {
                     request.Headers.Authorization =
                         new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", token.ToString());
@@ -256,8 +256,20 @@ public class ApiToolProvider(HttpClient httpClient) : IToolProvider
                 break;
 
             case "apikey":
-                if (auth.TryGetValue("key", out var key) && auth.TryGetValue("value", out var value))
+            case "api_key":
+                // Support both the legacy format (key/value) and the new format (apiKey)
+                if (auth.TryGetValue("apiKey", out var apiKey))
                 {
+                    // API keys can be added as headers (common patterns)
+                    // Check for header name, default to "X-API-Key"
+                    var headerName = auth.TryGetValue("key", out var keyName) 
+                        ? keyName.ToString() 
+                        : "X-API-Key";
+                    request.Headers.Add(headerName!, apiKey.ToString());
+                }
+                else if (auth.TryGetValue("key", out var key) && auth.TryGetValue("value", out var value))
+                {
+                    // Legacy format
                     request.Headers.Add(key.ToString()!, value.ToString()!);
                 }
                 break;
@@ -270,6 +282,133 @@ public class ApiToolProvider(HttpClient httpClient) : IToolProvider
                         new System.Net.Http.Headers.AuthenticationHeaderValue("Basic", credentials);
                 }
                 break;
+
+            case "oauth2":
+                // Check if a pre-obtained token exists
+                if (auth.TryGetValue("token", out var oauth2Token) || 
+                    auth.TryGetValue("accessToken", out oauth2Token))
+                {
+                    request.Headers.Authorization =
+                        new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", oauth2Token.ToString());
+                }
+                // Otherwise, obtain token using client credentials flow
+                else if (auth.TryGetValue("clientId", out var clientId) && 
+                         auth.TryGetValue("clientSecret", out var clientSecret) &&
+                         auth.TryGetValue("tokenUrl", out var tokenUrl))
+                {
+                    var accessToken = await ObtainOAuth2TokenAsync(
+                        tokenUrl.ToString()!,
+                        clientId.ToString()!,
+                        clientSecret.ToString()!,
+                        auth.TryGetValue("scopes", out var scopes) ? scopes.ToString() : null
+                    );
+
+                    if (!string.IsNullOrEmpty(accessToken))
+                    {
+                        request.Headers.Authorization =
+                            new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", accessToken);
+                    }
+                }
+                break;
+
+            case "azure_oauth2":
+                // Check if a pre-obtained token exists
+                if (auth.TryGetValue("token", out var azureToken) || 
+                    auth.TryGetValue("accessToken", out azureToken))
+                {
+                    request.Headers.Authorization =
+                        new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", azureToken.ToString());
+                }
+                // Otherwise, obtain token using Azure client credentials flow
+                else if (auth.TryGetValue("clientId", out var azureClientId) && 
+                         auth.TryGetValue("clientSecret", out var azureClientSecret) &&
+                         auth.TryGetValue("tenantId", out var tenantId))
+                {
+                    // Construct Azure token URL from tenant ID
+                    var azureTokenUrl = $"https://login.microsoftonline.com/{tenantId}/oauth2/v2.0/token";
+                    
+                    // Use resource if provided, otherwise use scopes
+                    var scope = auth.TryGetValue("resource", out var resource) 
+                        ? resource.ToString() 
+                        : auth.TryGetValue("scopes", out var azureScopes) 
+                            ? azureScopes.ToString() 
+                            : null;
+
+                    var accessToken = await ObtainOAuth2TokenAsync(
+                        azureTokenUrl,
+                        azureClientId.ToString()!,
+                        azureClientSecret.ToString()!,
+                        scope
+                    );
+
+                    if (!string.IsNullOrEmpty(accessToken))
+                    {
+                        request.Headers.Authorization =
+                            new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", accessToken);
+                    }
+                }
+                break;
+        }
+    }
+
+    /// <summary>
+    /// Obtains an OAuth2 access token using the client credentials flow.
+    /// </summary>
+    private static async Task<string?> ObtainOAuth2TokenAsync(
+        string tokenUrl, 
+        string clientId, 
+        string clientSecret, 
+        string? scopes)
+    {
+        try
+        {
+            using var tokenClient = new HttpClient();
+            
+            // Prepare the token request
+            var requestContent = new Dictionary<string, string>
+            {
+                ["grant_type"] = "client_credentials",
+                ["client_id"] = clientId,
+                ["client_secret"] = clientSecret
+            };
+
+            if (!string.IsNullOrWhiteSpace(scopes))
+            {
+                requestContent["scope"] = scopes;
+            }
+
+            var request = new HttpRequestMessage(HttpMethod.Post, tokenUrl)
+            {
+                Content = new FormUrlEncodedContent(requestContent)
+            };
+
+            var response = await tokenClient.SendAsync(request);
+            
+            if (!response.IsSuccessStatusCode)
+            {
+                var errorContent = await response.Content.ReadAsStringAsync();
+                throw new InvalidOperationException(
+                    $"Failed to obtain OAuth2 token. Status: {response.StatusCode}, Error: {errorContent}");
+            }
+
+            var responseContent = await response.Content.ReadAsStringAsync();
+            var tokenResponse = JsonSerializer.Deserialize<Dictionary<string, object>>(responseContent);
+
+            if (tokenResponse != null && tokenResponse.TryGetValue("access_token", out var accessToken))
+            {
+                // Handle JsonElement for access_token
+                if (accessToken is JsonElement jsonElement)
+                {
+                    return jsonElement.GetString();
+                }
+                return accessToken.ToString();
+            }
+
+            return null;
+        }
+        catch (Exception ex)
+        {
+            throw new InvalidOperationException($"Error obtaining OAuth2 token: {ex.Message}", ex);
         }
     }
 

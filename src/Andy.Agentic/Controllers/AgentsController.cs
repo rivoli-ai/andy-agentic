@@ -8,7 +8,7 @@ using Microsoft.AspNetCore.Authorization;
 namespace Andy.Agentic.Controllers;
 
 /// <summary>
-///     API controller for managing agents and their configurations.
+///     API controller for managing agents and their configurations.  
 /// </summary>
 [ApiController]
 [Route("api/[controller]")]
@@ -76,6 +76,7 @@ public class AgentsController(IAgentService agentService, IMapper mapper, IAuthS
     /// <param name="createAgentDto">The agent data for creation.</param>
     /// <returns>The created agent details.</returns>
     [HttpPost]
+     [Authorize(Policy = "WriteRole")]
     public async Task<ActionResult<AgentDto>> CreateAgent([FromBody] AgentDto createAgentDto)
     {
         try
@@ -116,6 +117,7 @@ public class AgentsController(IAgentService agentService, IMapper mapper, IAuthS
     /// <param name="updateAgentDto">The updated agent data.</param>
     /// <returns>The updated agent details.</returns>
     [HttpPut("{id}")]
+    [Authorize(Policy = "WriteRole")]
     public async Task<ActionResult<AgentDto>> UpdateAgent(Guid id, [FromBody] AgentDto updateAgentDto)
     {
         try
@@ -170,6 +172,7 @@ public class AgentsController(IAgentService agentService, IMapper mapper, IAuthS
     /// <param name="id">The unique identifier of the agent to delete.</param>
     /// <returns>Success or error response.</returns>
     [HttpDelete("{id}")]
+     [Authorize(Policy = "WriteRole")]
     public async Task<ActionResult> DeleteAgent(Guid id)
     {
         try

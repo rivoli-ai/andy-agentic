@@ -113,6 +113,7 @@ public class DocumentsController : ControllerBase
     /// <param name="createDocumentDto">The document creation data.</param>
     /// <returns>The created document.</returns>
     [HttpPost]
+     [Authorize(Policy = "WriteRole")]
     public async Task<ActionResult<DocumentDto>> CreateDocument([FromBody] CreateDocumentDto createDocumentDto)
     {
         try
@@ -137,6 +138,7 @@ public class DocumentsController : ControllerBase
     /// <param name="agentId">The agent ID to associate with the document.</param>
     /// <returns>The upload response.</returns>
     [HttpPost("upload")]
+     [Authorize(Policy = "WriteRole")]
     public async Task<ActionResult<DocumentUploadResponseDto>> UploadDocument(IFormFile file, [FromForm] Guid agentId)
     {
         try
@@ -203,6 +205,7 @@ public class DocumentsController : ControllerBase
     /// <param name="id">The document ID.</param>
     /// <returns>No content if successful.</returns>
     [HttpDelete("{id}")]
+     [Authorize(Policy = "WriteRole")]
     public async Task<IActionResult> DeleteDocument(Guid id)
     {
         try
@@ -227,6 +230,7 @@ public class DocumentsController : ControllerBase
     /// <param name="documentId">The document ID.</param>
     /// <returns>No content if successful.</returns>
     [HttpPost("associate")]
+     [Authorize(Policy = "WriteRole")]
     public async Task<IActionResult> AssociateDocumentWithAgent([FromQuery] Guid agentId, [FromQuery] Guid documentId)
     {
         try
@@ -263,6 +267,7 @@ public class DocumentsController : ControllerBase
     /// <param name="documentId">The document ID.</param>
     /// <returns>No content if successful.</returns>
     [HttpDelete("associate")]
+     [Authorize(Policy = "WriteRole")]
     public async Task<IActionResult> RemoveDocumentFromAgent([FromQuery] Guid agentId, [FromQuery] Guid documentId)
     {
         try
@@ -341,6 +346,7 @@ public class DocumentsController : ControllerBase
     /// </summary>
     /// <returns>The service status.</returns>
     [HttpGet("rag-status")]
+     [Authorize(Policy = "WriteRole")]
     public IActionResult GetRagServiceStatus()
     {
         try
@@ -366,6 +372,7 @@ public class DocumentsController : ControllerBase
     /// </summary>
     /// <returns>The test result.</returns>
     [HttpPost("test-rag-queue")]
+     [Authorize(Policy = "WriteRole")]
     public async Task<IActionResult> TestRagQueue()
     {
         try
@@ -386,6 +393,7 @@ public class DocumentsController : ControllerBase
     /// </summary>
     /// <returns>The service registration status.</returns>
     [HttpGet("check-service-registration")]
+     [Authorize(Policy = "WriteRole")]
     public IActionResult CheckServiceRegistration()
     {
         try

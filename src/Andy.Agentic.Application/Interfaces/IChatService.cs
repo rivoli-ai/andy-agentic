@@ -6,9 +6,9 @@ namespace Andy.Agentic.Application.Interfaces;
 
 public interface IChatService
 {
-    IAsyncEnumerable<object> GetMessageStreamAsync(ChatMessage chatMessage);
+    IAsyncEnumerable<object> GetMessageStreamAsync(ChatMessage chatMessage, CancellationToken cancellationToken = default);
 
-    IAsyncEnumerable<string> SendMessageStreamAsync(ChatMessage chatMessage);
+    IAsyncEnumerable<string> SendMessageStreamAsync(ChatMessage chatMessage, CancellationToken cancellationToken = default);
     
     Task<IEnumerable<ChatHistory>> GetChatHistoryAsync(Guid agentId);
     Task<IEnumerable<ChatHistory>> GetChatHistoryBySessionAsync(string sessionId);
@@ -51,5 +51,5 @@ public interface IChatService
 
     IAsyncEnumerable<string> SendMessageStreamRecursiveAsync(Agent agent, Prompt activePrompt,
         string messageContent, string sessionId,
-        List<ToolExecutionLog>? toolResults = null);
+        List<ToolExecutionLog>? toolResults = null, CancellationToken cancellationToken = default);
 }

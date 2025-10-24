@@ -8,6 +8,7 @@ using Andy.Agentic.Domain.Interfaces.Llm;
 using Andy.Agentic.Domain.Interfaces.Llm.Semantic;
 using Andy.Agentic.Domain.Models;
 using AutoMapper;
+using System.Runtime.CompilerServices;
 
 namespace Andy.Agentic.Application.Services;
 
@@ -219,15 +220,14 @@ public class LlmService(ILlmRepository llmRepository, ILlmProviderFactory provid
     public async IAsyncEnumerable<StreamingResult> SendToLlmProviderStreamAsync(Agent agent,
         LlmRequest request,
         string session,
-        ToolExecutionRecorder toolExecutionRecorder)
+        ToolExecutionRecorder toolExecutionRecorder,
+        [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
         var kernel = semenSemanticKernelBuilder.BuildKernelAsync(agent, session, agent.LlmConfig, request, toolExecutionRecorder);
-        await foreach (var chunk in semenSemanticKernelBuilder.CallAgentAsync(kernel))
+        await foreach (var chunk in semenSemanticKernelBuilder.CallAgentAsync(kernel, cancellationToken))
         {
             yield return new StreamingResult { Content = chunk.Content };
-
         }
-
     }
 
     /// <summary>

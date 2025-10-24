@@ -21,9 +21,10 @@ public class ChatController(IChatService chatService, IMapper mapper, IAuthServi
     ///     Sends a message to an agent and streams the response back in real-time using Server-Sent Events.
     /// </summary>
     /// <param name="chatMessage">The chat message containing content, agent ID, and session information.</param>
+    /// <param name="cancellationToken">Cancellation token to stop the streaming operation.</param>
     // POST: api/chat/stream
     [HttpPost("stream")]
-    public async Task SendMessageStream([FromBody] ChatMessageDto chatMessage)
+    public async Task SendMessageStream([FromBody] ChatMessageDto chatMessage, CancellationToken cancellationToken = default)
     {
         // Set SSE headers
         Response.Headers["Content-Type"] = "text/event-stream; charset=utf-8";
@@ -50,7 +51,7 @@ public class ChatController(IChatService chatService, IMapper mapper, IAuthServi
             var mappedMessage = mapper.Map<ChatMessage>(chatMessage);
             mappedMessage.UserId = currentUser.Id;
 
-            await foreach (var chunk in chatService.GetMessageStreamAsync(mappedMessage))
+            await foreach (var chunk in chatService.GetMessageStreamAsync(mappedMessage, cancellationToken))
             {
                 var jsonResponse = JsonSerializer.Serialize(chunk,
                     new JsonSerializerOptions { Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping });

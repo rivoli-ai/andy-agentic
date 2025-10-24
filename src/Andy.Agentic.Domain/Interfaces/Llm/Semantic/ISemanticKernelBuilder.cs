@@ -7,6 +7,7 @@ namespace Andy.Agentic.Domain.Interfaces.Llm.Semantic;
 public interface ISemanticKernelBuilder
 {
     IAsyncEnumerable<StreamingChatMessageContent> CallAgentAsync(KernelResponse kernel);
+    IAsyncEnumerable<StreamingChatMessageContent> CallAgentAsync(KernelResponse kernel, CancellationToken cancellationToken);
     KernelResponse BuildKernelAsync(Agent agent,
         string session,
         LlmConfig config,

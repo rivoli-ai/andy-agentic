@@ -2,6 +2,7 @@ using Andy.Agentic.Application.DTOs;
 using Andy.Agentic.Application.Interfaces;
 using Andy.Agentic.Domain.Models;
 using AutoMapper;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Andy.Agentic.Controllers;
@@ -11,6 +12,7 @@ namespace Andy.Agentic.Controllers;
 /// </summary>
 [ApiController]
 [Route("api/[controller]")]
+[Authorize]
 public class ToolExecutionController : ControllerBase
 {
     private readonly IMapper _mapper;
@@ -32,6 +34,7 @@ public class ToolExecutionController : ControllerBase
     /// <param name="request">The tool execution request containing tool information and parameters.</param>
     /// <returns>The execution log with results and status.</returns>
     [HttpPost("execute")]
+     [Authorize(Policy = "WriteRole")]
     public async Task<ActionResult<ToolExecutionLogDto>> ExecuteTool([FromBody] ToolExecutionLogDto request)
     {
         try

@@ -92,8 +92,11 @@ public class Startup
                 options.TokenValidationParameters = new Microsoft.IdentityModel.Tokens.TokenValidationParameters
                 {
                     ValidateAudience = true,
-                    ValidAudiences = new[] { $"{_configuration["AzureAd:Audience"]}", $"{_configuration["AzureAd:ClientId"]}" }
+                    ValidAudiences = [$"{_configuration["AzureAd:Audience"]}", $"{_configuration["AzureAd:ClientId"]}"],
+                    RoleClaimType = "http://schemas.microsoft.com/ws/2008/06/identity/claims/role"
                 };
+
+
             });
 
         services.AddAuthorization(options =>
@@ -101,6 +104,12 @@ public class Startup
             options.AddPolicy("ReadScope", policy =>
             {
                 policy.RequireClaim("scp", "Api.Access");
+            });
+            
+            // Role-based authorization policies
+            options.AddPolicy("WriteRole", policy =>
+            {
+                policy.RequireRole("Api.Write"); // Only Write role can modify
             });
         });
 

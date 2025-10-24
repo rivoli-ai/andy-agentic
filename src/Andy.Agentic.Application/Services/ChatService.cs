@@ -3,6 +3,7 @@ using Andy.Agentic.Domain.Interfaces.Database;
 using Andy.Agentic.Domain.Models;
 using Andy.Agentic.Domain.Queries.SearchCriteria;
 using System.Linq;
+using System.Runtime.CompilerServices;
 
 namespace Andy.Agentic.Application.Services;
 
@@ -29,8 +30,9 @@ public class ChatService(
     /// Sends a message to an agent and streams the response back asynchronously.
     /// </summary>
     /// <param name="chatMessage">The message to send, including agent ID and content.</param>
+    /// <param name="cancellationToken">Cancellation token to stop the streaming operation.</param>
     /// <returns>An async enumerable of response chunks as they are generated.</returns>
-    public async IAsyncEnumerable<string> SendMessageStreamAsync(ChatMessage chatMessage)
+    public async IAsyncEnumerable<string> SendMessageStreamAsync(ChatMessage chatMessage, [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
         var validationResult = ValidateChatMessage(chatMessage);
         if (!validationResult.IsValid)
@@ -57,7 +59,7 @@ public class ChatService(
 
         await SaveUserMessageAsync(chatMessage, sessionId);
 
-        await foreach (var chunk in SendMessageStreamRecursiveAsync(agent, activePrompt, chatMessage.Content, sessionId))
+        await foreach (var chunk in SendMessageStreamRecursiveAsync(agent, activePrompt, chatMessage.Content, sessionId, null, cancellationToken))
         {
             yield return chunk;
         }
@@ -71,13 +73,15 @@ public class ChatService(
     /// <param name="messageContent">The content of the message to process.</param>
     /// <param name="sessionId">The session ID for the conversation.</param>
     /// <param name="toolResults"></param>
+    /// <param name="cancellationToken">Cancellation token to stop the streaming operation.</param>
     /// <returns>An async enumerable of response chunks as they are generated.</returns>
     public async IAsyncEnumerable<string> SendMessageStreamRecursiveAsync(Agent agent,
         Prompt activePrompt,
         string messageContent,
         string sessionId,
-        List<ToolExecutionLog>? toolResults = null)
+        List<ToolExecutionLog>? toolResults = null, [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
+
         var recentMessages = await databaseResourceAccess.GetChatHistoryBySessionAsync(sessionId);
 
         var chatRequest = await llmResourceAccess.PrepareLlmMessageAsync(agent, activePrompt, messageContent, sessionId,recentMessages.ToList());
@@ -85,24 +89,33 @@ public class ChatService(
         var responseContent = new List<string?>();
         var recorder = new ToolExecutionRecorder();
 
-        await foreach (var chunk in llmResourceAccess.SendToLlmProviderStreamAsync(agent, chatRequest, sessionId, recorder))
+        await foreach (var chunk in llmResourceAccess.SendToLlmProviderStreamAsync(agent, chatRequest, sessionId, recorder, cancellationToken))
         {
+            if (cancellationToken.IsCancellationRequested)
+            {
+                await SaveAssistantMessageAsync(agent, sessionId, responseContent, recorder.Records.ToList());
+                cancellationToken.ThrowIfCancellationRequested();
+            }
             responseContent.Add(chunk.Content);
             yield return chunk.Content!;
         }
 
+        // Always save the message
         await SaveAssistantMessageAsync(agent, sessionId, responseContent, recorder.Records.ToList());
 
     }
+
+
 
     /// <summary>
     /// Gets a message stream formatted for API consumption.
     /// </summary>
     /// <param name="chatMessage">The message to process and stream.</param>
+    /// <param name="cancellationToken">Cancellation token to stop the streaming operation.</param>
     /// <returns>An async enumerable of formatted response objects.</returns>
-    public async IAsyncEnumerable<object> GetMessageStreamAsync(ChatMessage chatMessage)
+    public async IAsyncEnumerable<object> GetMessageStreamAsync(ChatMessage chatMessage, [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
-        await foreach (var chunk in SendMessageStreamAsync(chatMessage))
+        await foreach (var chunk in SendMessageStreamAsync(chatMessage, cancellationToken))
         {
             if (!string.IsNullOrEmpty(chunk))
             {
@@ -412,7 +425,8 @@ public class ChatService(
         List<ToolExecutionLog> toolResults)
     {
         var fullResponse = string.Join("", responseContent);
-        var succeededExecutions = toolResults.Where(x => x.Success).ToList();
+        // Save all tool executions, both successful and failed
+        var allExecutions = toolResults.ToList();
 
         if (string.IsNullOrEmpty(fullResponse) && !toolResults.Any())
         {
@@ -426,8 +440,8 @@ public class ChatService(
             AgentId = agent.Id,
             SessionId = sessionId,
             TokenCount = fullResponse.Length * DefaultTokenCountMultiplier,
-            ToolResults = succeededExecutions,
-            IsToolExecution = succeededExecutions.Any() 
+            ToolResults = allExecutions,
+            IsToolExecution = allExecutions.Any() 
         });
     }
 
@@ -439,14 +453,12 @@ public class ChatService(
     /// <param name="activePrompt">The active prompt for the agent.</param>
     /// <param name="sessionId">The session ID for the conversation.</param>
     /// <param name="toolsToCall">The tools to execute.</param>
-    /// <param name="chatRequest">The original chat request.</param>
     /// <returns>An async enumerable of response chunks from tool execution.</returns>
     private async IAsyncEnumerable<string> ProcessToolCallsAsync(
         Agent agent,
         Prompt activePrompt,
         string sessionId,
-        List<ToolCall?> toolsToCall,
-        LlmRequest chatRequest)
+        List<ToolCall?> toolsToCall)
     {
         var toolResults = await toolExecutionService.ExecuteToolCallsAsync(toolsToCall.Where(t => t != null).Cast<ToolCall>().ToList(), agent, sessionId);
         
