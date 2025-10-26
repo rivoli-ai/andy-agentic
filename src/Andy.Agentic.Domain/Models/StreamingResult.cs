@@ -6,4 +6,5 @@ public class StreamingResult
     public List<ToolCall>? ToolCalls { get; set; }
     public string? AssistantMessage { get; set; }
     public List<string?> Messages { get; set; }
+    public string? Thinking { get; set; }
 }

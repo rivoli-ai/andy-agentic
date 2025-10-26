@@ -16,10 +16,7 @@ using Andy.Agentic.Infrastructure.Semantic.Provider;
 using Andy.Agentic.Infrastructure.Services;
 using Andy.Agentic.Infrastructure.Services.ToolProviders;
 using Andy.Agentic.Infrastructure.UnitOfWorks;
-using Andy.ResourceAccess.DataBase;
-using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.Identity.Web;
 using Npgsql;
 
 namespace Andy.Agentic;
@@ -27,26 +24,12 @@ namespace Andy.Agentic;
 /// <summary>
 ///     Startup configuration class that organizes application configuration into logical sections.
 /// </summary>
-public class Startup
+public class Startup(IConfiguration configuration)
 {
-    private readonly IConfiguration _configuration;
-    private readonly IWebHostEnvironment _environment;
-
-    /// <summary>
-    ///     Initializes a new instance of the Startup class.
-    /// </summary>
-    /// <param name="configuration">The application configuration.</param>
-    /// <param name="environment">The web hosting environment.</param>
-    public Startup(IConfiguration configuration, IWebHostEnvironment environment)
-    {
-        _configuration = configuration;
-        _environment = environment;
-    }
 
     /// <summary>
     ///     Configures the application services.
     /// </summary>
-    /// <param name="services">The service collection to configure.</param>
     [Experimental("SKEXP0001")]
     public void ConfigureApplicationServices(IServiceCollection services)
     {
@@ -63,7 +46,6 @@ public class Startup
     /// <summary>
     ///     Configures the web application.
     /// </summary>
-    /// <param name="app">The web application to configure.</param>
     public void ConfigureApplication(WebApplication app)
     {
         ConfigureDevelopmentEnvironment(app);
@@ -72,95 +54,114 @@ public class Startup
     }
 
     /// <summary>
-    ///     Configures web-related services like controllers, CORS, and Swagger.
+    ///     Configures web-related services like controllers, CORS, authentication, and Swagger.
     /// </summary>
-    /// <param name="services">The service collection to configure.</param>
     private void ConfigureWebServices(IServiceCollection services)
     {
         services.AddControllers();
         services.AddEndpointsApiExplorer();
         services.AddSwaggerGen();
-        
-        // Add SignalR for real-time notifications
         services.AddSignalR();
 
-        // Add JWT Bearer authentication for Microsoft Graph tokens
+        ConfigureAuthentication(services);
+        ConfigureAuthorization(services);
+        ConfigureCors(services);
+    }
+
+    /// <summary>
+    ///     Configures JWT Bearer authentication for Microsoft Graph tokens.
+    /// </summary>
+    private void ConfigureAuthentication(IServiceCollection services) =>
         services.AddAuthentication("Bearer")
             .AddJwtBearer("Bearer", options =>
             {
-                options.Authority = $"{ _configuration["AzureAd:Instance"]}{_configuration["AzureAd:TenantId"]}/v2.0";
+                options.Authority = $"{configuration["AzureAd:Instance"]}{configuration["AzureAd:TenantId"]}/v2.0";
                 options.TokenValidationParameters = new Microsoft.IdentityModel.Tokens.TokenValidationParameters
                 {
                     ValidateAudience = true,
-                    ValidAudiences = [$"{_configuration["AzureAd:Audience"]}", $"{_configuration["AzureAd:ClientId"]}"],
+                    ValidAudiences = [$"{configuration["AzureAd:Audience"]}", $"{configuration["AzureAd:ClientId"]}"],
                     RoleClaimType = "http://schemas.microsoft.com/ws/2008/06/identity/claims/role"
                 };
-
-
             });
 
+    /// <summary>
+    ///     Configures authorization policies.
+    /// </summary>
+    private void ConfigureAuthorization(IServiceCollection services) =>
         services.AddAuthorization(options =>
         {
             options.AddPolicy("ReadScope", policy =>
             {
                 policy.RequireClaim("scp", "Api.Access");
             });
-            
-            // Role-based authorization policies
+
             options.AddPolicy("WriteRole", policy =>
             {
-                policy.RequireRole("Api.Write"); // Only Write role can modify
+                policy.RequireRole("Api.Write");
             });
         });
 
+    /// <summary>
+    ///     Configures CORS policy for Angular application.
+    /// </summary>
+    private void ConfigureCors(IServiceCollection services) =>
         services.AddCors(options =>
         {
             options.AddPolicy("AllowAngularApp", policy =>
             {
-                policy.WithOrigins("http://flexagent.online", "http://localhost:4200")
+                policy.WithOrigins("http://localhost:4200")
                     .AllowAnyHeader()
                     .AllowAnyMethod()
-                    .AllowCredentials(); // Required for authentication
+                    .AllowCredentials();
             });
         });
-    }
 
     /// <summary>
-    ///     Configures database-related services and connection.
+    ///     Configures database services conditionally based on environment.
+    ///     Production/Development: PostgreSQL
+    ///     Test: InMemory (configured in test setup)
     /// </summary>
-    /// <param name="services">The service collection to configure.</param>
     private void ConfigureDatabase(IServiceCollection services)
     {
         services.AddDbContext<AndyDbContext>(options =>
             options.UseNpgsql(
-                _configuration.GetConnectionString("DefaultConnection")
+                configuration.GetConnectionString("DefaultConnection")
             ));
 
-        services.AddSingleton(sp =>
+        services.AddSingleton(_ =>
         {
-            NpgsqlDataSourceBuilder dataSourceBuilder = new(_configuration.GetConnectionString("DefaultConnection"));
+            var connectionString = configuration.GetConnectionString("DefaultConnection");
+            var dataSourceBuilder = new NpgsqlDataSourceBuilder(connectionString);
             dataSourceBuilder.UseVector();
             return dataSourceBuilder.Build();
         });
     }
-      
+
     /// <summary>
     ///     Configures AutoMapper profiles.
     /// </summary>
-    /// <param name="services">The service collection to configure.</param>
     private void ConfigureAutoMapper(IServiceCollection services)
     {
         services.AddAutoMapper(typeof(EntityMapperProfile));
         services.AddAutoMapper(typeof(DtosMapperProfile));
     }
 
+
     /// <summary>
     ///     Configures repository registrations.
     /// </summary>
-    /// <param name="services">The service collection to configure.</param>
     private void ConfigureRepositories(IServiceCollection services)
     {
-        // Database Repositories
+        ConfigureDatabaseRepositories(services);
+        ConfigureLlmRepositories(services);
+        ConfigureUnitOfWork(services);
+    }
+
+    /// <summary>
+    ///     Configures database repositories.
+    /// </summary>
+    private void ConfigureDatabaseRepositories(IServiceCollection services)
+    {
         services.AddScoped<IAgentRepository, AgentRepository>();
         services.AddScoped<IToolRepository, ToolRepository>();
         services.AddScoped<ILlmRepository, LlmRepository>();
@@ -172,23 +173,43 @@ public class Startup
         services.AddScoped<IUserRepository, UserRepository>();
         services.AddScoped<IDocumentRepository, DocumentRepository>();
         services.AddScoped<IAgentDocumentRepository, AgentDocumentRepository>();
-        // LLM Provider Repositories
+    }
+
+    /// <summary>
+    ///     Configures LLM provider repositories.
+    /// </summary>
+    private void ConfigureLlmRepositories(IServiceCollection services)
+    {
         services.AddScoped<ILLmProviderRepository, OpenAiRepository>();
         services.AddScoped<ILLmProviderRepository, OllamaRepository>();
         services.AddScoped<ILlmProviderFactory, LlmProviderFactory>();
+    }
 
-        // Unit of Work
+    /// <summary>
+    ///     Configures Unit of Work pattern.
+    /// </summary>
+    private void ConfigureUnitOfWork(IServiceCollection services)
+    {
         services.AddScoped<IUnitOfWork, UnitOfWork>();
     }
+
 
     /// <summary>
     ///     Configures core application services.
     /// </summary>
-    /// <param name="services">The service collection to configure.</param>
     [Experimental("SKEXP0001")]
     private void ConfigureCoreServices(IServiceCollection services)
     {
-        // Core Services
+        ConfigureBusinessServices(services);
+        ConfigureDocumentServices(services);
+        ConfigureAuthenticationServices(services);
+    }
+
+    /// <summary>
+    ///     Configures business logic services.
+    /// </summary>
+    private void ConfigureBusinessServices(IServiceCollection services)
+    {
         services.AddScoped<IDataBaseService, DatabaseService>();
         services.AddScoped<ILlmService, LlmService>();
         services.AddScoped<IToolService, ToolService>();
@@ -197,15 +218,29 @@ public class Startup
         services.AddScoped<ITagService, TagService>();
         services.AddScoped<IAgentService, AgentService>();
         services.AddScoped<IMcpService, McpService>();
+    }
+
+    /// <summary>
+    ///     Configures document and RAG services.
+    /// </summary>
+    private void ConfigureDocumentServices(IServiceCollection services)
+    {
         services.AddScoped<IDocumentService, DocumentService>();
         services.AddScoped<IDocumentRagProvider, DocumentRagProvider>();
-        services.AddSingleton<DocumentRagBackgroundService>();
-        services.AddSingleton<IDocumentRagBackgroundService>(provider => 
-            provider.GetRequiredService<DocumentRagBackgroundService>());
-        services.AddHostedService<DocumentRagBackgroundService>(provider => 
-            provider.GetRequiredService<DocumentRagBackgroundService>());
 
-        // Authentication Services
+        // Register DocumentRagBackgroundService as singleton and hosted service
+        services.AddSingleton<DocumentRagBackgroundService>();
+        services.AddSingleton<IDocumentRagBackgroundService>(provider =>
+            provider.GetRequiredService<DocumentRagBackgroundService>());
+        services.AddHostedService<DocumentRagBackgroundService>(provider =>
+            provider.GetRequiredService<DocumentRagBackgroundService>());
+    }
+
+    /// <summary>
+    ///     Configures authentication services.
+    /// </summary>
+    private void ConfigureAuthenticationServices(IServiceCollection services)
+    {
         services.AddScoped<IAuthService, AuthService>();
         services.AddHttpContextAccessor();
     }
@@ -213,13 +248,11 @@ public class Startup
     /// <summary>
     ///     Configures HTTP client services.
     /// </summary>
-    /// <param name="services">The service collection to configure.</param>
     private void ConfigureHttpClient(IServiceCollection services) => services.AddHttpClient();
 
     /// <summary>
     ///     Configures tool provider services.
     /// </summary>
-    /// <param name="services">The service collection to configure.</param>
     private void ConfigureToolProviders(IServiceCollection services)
     {
         services.AddScoped<IToolProvider, ApiToolProvider>();
@@ -229,7 +262,6 @@ public class Startup
     /// <summary>
     ///     Configures the development environment settings.
     /// </summary>
-    /// <param name="app">The web application to configure.</param>
     private void ConfigureDevelopmentEnvironment(WebApplication app)
     {
         if (app.Environment.IsDevelopment())
@@ -242,24 +274,23 @@ public class Startup
     /// <summary>
     ///     Configures middleware pipeline.
     /// </summary>
-    /// <param name="app">The web application to configure.</param>
     private void ConfigureMiddleware(WebApplication app)
     {
         app.UseCors("AllowAngularApp");
-        app.UseAuthentication(); // Add this before UseAuthorization
+        app.UseAuthentication();
         app.UseAuthorization();
         app.MapControllers();
-        app.MapHub<Andy.Agentic.Infrastructure.Semantic.DocumentRagHub>("/documentRagHub");
+        app.MapHub<DocumentRagHub>("/documentRagHub");
     }
 
     /// <summary>
-    ///     Configures database initialization and seeding.
+    ///     Configures database initialization and migration (only for non-test environments).
     /// </summary>
-    /// <param name="app">The web application to configure.</param>
     private void ConfigureDatabaseInitialization(WebApplication app)
     {
         using var scope = app.Services.CreateScope();
         var context = scope.ServiceProvider.GetRequiredService<AndyDbContext>();
         context.Database.Migrate();
     }
+
 }

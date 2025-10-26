@@ -7,4 +7,5 @@ public class ChatMessagePreviewDto
     public bool IsToolExecution { get; set; }
     public string? ToolName { get; set; }
     public Guid? UserId { get; set; }
+    public string? Thinking { get; set; }
 }

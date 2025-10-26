@@ -33,6 +33,10 @@ public class ChatMessageDto
 
     public List<ToolExecutionLogDto> ToolResults { get; set; } = new();
 
+    /// <summary>
+    ///     Model's thinking process or reasoning before generating the response.
+    /// </summary>
+    public string? Thinking { get; set; }
 
 }
 

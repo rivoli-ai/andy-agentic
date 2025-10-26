@@ -224,9 +224,35 @@ public class LlmService(ILlmRepository llmRepository, ILlmProviderFactory provid
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
         var kernel = semenSemanticKernelBuilder.BuildKernelAsync(agent, session, agent.LlmConfig, request, toolExecutionRecorder);
+        var thinkingBuffer = new List<string>();
+        var isThinking = false;
+        
         await foreach (var chunk in semenSemanticKernelBuilder.CallAgentAsync(kernel, cancellationToken))
         {
-            yield return new StreamingResult { Content = chunk.Content };
+            var content = chunk.Content ?? string.Empty;
+            
+            // Simple heuristic to detect thinking patterns
+            // Look for common thinking indicators
+            if (content.Contains("<think>"))
+            {
+                isThinking = true;
+                continue;
+            }
+            
+            if (isThinking)
+            {
+                if (content.Contains("</think>"))
+                {
+                    isThinking = false;
+                    continue;
+                }
+
+                yield return new StreamingResult { Thinking = content };
+            }
+            else
+            {
+                yield return new StreamingResult { Content = content };
+            }
         }
     }
 

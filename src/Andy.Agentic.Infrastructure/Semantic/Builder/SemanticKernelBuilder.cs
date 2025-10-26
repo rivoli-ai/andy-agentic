@@ -99,6 +99,7 @@ public class SemanticKernelBuilder : ISemanticKernelBuilder
                     new OpenAIPromptExecutionSettings()
                     {
                         FunctionChoiceBehavior = FunctionChoiceBehavior.Auto(),
+                        ReasoningEffort = "high"
                     }) : null,
                 UseImmutableKernel = hastTools
             };

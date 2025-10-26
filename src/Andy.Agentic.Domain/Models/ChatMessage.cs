@@ -20,4 +20,6 @@ public class ChatMessage
     public Guid? UserId { get; set; }
 
     public List<ToolExecutionLog> ToolResults { get; set; } = new();
+
+    public string? Thinking { get; set; }
 }

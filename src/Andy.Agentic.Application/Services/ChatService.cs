@@ -32,26 +32,27 @@ public class ChatService(
     /// <param name="chatMessage">The message to send, including agent ID and content.</param>
     /// <param name="cancellationToken">Cancellation token to stop the streaming operation.</param>
     /// <returns>An async enumerable of response chunks as they are generated.</returns>
-    public async IAsyncEnumerable<string> SendMessageStreamAsync(ChatMessage chatMessage, [EnumeratorCancellation] CancellationToken cancellationToken = default)
+    public async IAsyncEnumerable<StreamingResult> SendMessageStreamAsync(ChatMessage chatMessage, [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
         var validationResult = ValidateChatMessage(chatMessage);
         if (!validationResult.IsValid)
         {
-            yield return validationResult.ErrorMessage;
+
+            yield return new StreamingResult { Content = validationResult.ErrorMessage };
             yield break;
         }
 
         var agent = await databaseResourceAccess.GetAgentByIdAsync(chatMessage.AgentId!.Value);
         if (agent == null)
         {
-            yield return "Error: Agent not found";
+            yield return new StreamingResult { Content = "Error: Agent not found" };
             yield break;
         }
 
         var activePrompt = GetActivePrompt(agent);
         if (activePrompt == null)
         {
-            yield return "Error: Agent has no active prompt";
+            yield return new StreamingResult { Content = "Error: Agent has no active prompt" };
             yield break;
         }
 
@@ -75,7 +76,7 @@ public class ChatService(
     /// <param name="toolResults"></param>
     /// <param name="cancellationToken">Cancellation token to stop the streaming operation.</param>
     /// <returns>An async enumerable of response chunks as they are generated.</returns>
-    public async IAsyncEnumerable<string> SendMessageStreamRecursiveAsync(Agent agent,
+    public async IAsyncEnumerable<StreamingResult> SendMessageStreamRecursiveAsync(Agent agent,
         Prompt activePrompt,
         string messageContent,
         string sessionId,
@@ -87,21 +88,31 @@ public class ChatService(
         var chatRequest = await llmResourceAccess.PrepareLlmMessageAsync(agent, activePrompt, messageContent, sessionId,recentMessages.ToList());
 
         var responseContent = new List<string?>();
+        var thinkingContent = new List<string?>();
         var recorder = new ToolExecutionRecorder();
 
         await foreach (var chunk in llmResourceAccess.SendToLlmProviderStreamAsync(agent, chatRequest, sessionId, recorder, cancellationToken))
         {
             if (cancellationToken.IsCancellationRequested)
             {
-                await SaveAssistantMessageAsync(agent, sessionId, responseContent, recorder.Records.ToList());
+                await SaveAssistantMessageAsync(agent, sessionId, responseContent, thinkingContent, recorder.Records.ToList());
                 cancellationToken.ThrowIfCancellationRequested();
             }
+            
+            // Check if this chunk contains thinking content
+            if (!string.IsNullOrEmpty(chunk.Thinking))
+            {
+                thinkingContent.Add(chunk.Thinking);
+                // Don't yield thinking content as part of the main response
+                yield return chunk!;
+            }
+            
             responseContent.Add(chunk.Content);
-            yield return chunk.Content!;
+            yield return chunk!;
         }
 
         // Always save the message
-        await SaveAssistantMessageAsync(agent, sessionId, responseContent, recorder.Records.ToList());
+        await SaveAssistantMessageAsync(agent, sessionId, responseContent, thinkingContent, recorder.Records.ToList());
 
     }
 
@@ -117,7 +128,7 @@ public class ChatService(
     {
         await foreach (var chunk in SendMessageStreamAsync(chatMessage, cancellationToken))
         {
-            if (!string.IsNullOrEmpty(chunk))
+            if (chunk != null)
             {
                 yield return new
                 {
@@ -130,7 +141,7 @@ public class ChatService(
                         new
                         {
                             index = 0,
-                            delta = new { content = chunk },
+                            delta = new {thinking = chunk.Thinking, content = chunk.Content },
                             finish_reason = (string?)null
                         }
                     }
@@ -420,11 +431,13 @@ public class ChatService(
     /// <param name="agent">The agent that generated the response.</param>
     /// <param name="sessionId">The session ID to associate with the message.</param>
     /// <param name="responseContent">The response content chunks.</param>
+    /// <param name="thinkingContent">The thinking content chunks.</param>
     /// <param name="toolResults"></param>
     private async Task SaveAssistantMessageAsync(Agent agent, string sessionId, List<string?> responseContent,
-        List<ToolExecutionLog> toolResults)
+        List<string?> thinkingContent, List<ToolExecutionLog> toolResults)
     {
         var fullResponse = string.Join("", responseContent);
+        var fullThinking = string.Join("", thinkingContent);
         // Save all tool executions, both successful and failed
         var allExecutions = toolResults.ToList();
 
@@ -441,7 +454,8 @@ public class ChatService(
             SessionId = sessionId,
             TokenCount = fullResponse.Length * DefaultTokenCountMultiplier,
             ToolResults = allExecutions,
-            IsToolExecution = allExecutions.Any() 
+            IsToolExecution = allExecutions.Any(),
+            Thinking = string.IsNullOrEmpty(fullThinking) ? null : fullThinking
         });
     }
 
@@ -454,7 +468,7 @@ public class ChatService(
     /// <param name="sessionId">The session ID for the conversation.</param>
     /// <param name="toolsToCall">The tools to execute.</param>
     /// <returns>An async enumerable of response chunks from tool execution.</returns>
-    private async IAsyncEnumerable<string> ProcessToolCallsAsync(
+    private async IAsyncEnumerable<StreamingResult> ProcessToolCallsAsync(
         Agent agent,
         Prompt activePrompt,
         string sessionId,

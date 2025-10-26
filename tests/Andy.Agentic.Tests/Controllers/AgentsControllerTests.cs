@@ -6,21 +6,27 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging;
 using System.Security.Claims;
+using Moq;
+using FluentAssertions;
+using AutoMapper;
+using Andy.Agentic.Application.DTOs;
 
 namespace Andy.Agentic.Tests.Controllers;
 
 public class AgentsControllerTests
 {
     private readonly Mock<IAgentService> _mockAgentService;
-    private readonly Mock<ILogger<AgentsController>> _mockLogger;
+    private readonly Mock<IMapper> _mockMapper;
+    private readonly Mock<IAuthService> _mockAuthService;
     private readonly AgentsController _controller;
 
     public AgentsControllerTests()
     {
         _mockAgentService = new Mock<IAgentService>();
-        _mockLogger = new Mock<ILogger<AgentsController>>();
-        _controller = new AgentsController(_mockAgentService.Object, _mockLogger.Object);
-        
+        _mockMapper = new Mock<IMapper>();
+        _mockAuthService = new Mock<IAuthService>();
+        _controller = new AgentsController(_mockAgentService.Object, _mockMapper.Object, _mockAuthService.Object);
+
         // Setup controller context with user claims
         var claims = new List<Claim>
         {
@@ -30,7 +36,7 @@ public class AgentsControllerTests
         };
         var identity = new ClaimsIdentity(claims, "TestAuthType");
         var claimsPrincipal = new ClaimsPrincipal(identity);
-        
+
         _controller.ControllerContext = new ControllerContext
         {
             HttpContext = new DefaultHttpContext
@@ -44,24 +50,30 @@ public class AgentsControllerTests
     public async Task GetAllAgents_ShouldReturnAllAgents()
     {
         // Arrange
-        var expectedAgents = new List<Agent>
+        var mockedAgents = new List<Agent>
         {
             new() { Id = Guid.NewGuid(), Name = "Agent 1", Description = "Description 1", IsActive = true },
             new() { Id = Guid.NewGuid(), Name = "Agent 2", Description = "Description 2", IsActive = true }
         };
 
+        var currentUser = new UserDto { Id = Guid.NewGuid(), Email = "test@example.com" };
+
+        _mockAuthService
+            .Setup(x => x.GetCurrentUserAsync())
+            .ReturnsAsync(currentUser);
+
         _mockAgentService
-            .Setup(x => x.GetAllAgentsAsync())
-            .ReturnsAsync(expectedAgents);
+            .Setup(x => x.GetVisibleAgentsAsync(currentUser.Id))
+            .ReturnsAsync(mockedAgents);
 
         // Act
-        var result = await _controller.GetAllAgents();
+        var result = await _controller.GetAgents();
 
         // Assert
-        result.Should().BeOfType<OkObjectResult>();
-        var okResult = result as OkObjectResult;
-        okResult!.Value.Should().BeEquivalentTo(expectedAgents);
-        _mockAgentService.Verify(x => x.GetAllAgentsAsync(), Times.Once);
+        result.Should().BeOfType<ActionResult<IEnumerable<AgentDto>>>()
+            .Which.Result.Should().BeOfType<OkObjectResult>()
+            .Which.Value.Should().BeEquivalentTo(mockedAgents);
+        _mockAgentService.Verify(x => x.GetVisibleAgentsAsync(currentUser.Id), Times.Once);
     }
 
     [Fact]
@@ -69,30 +81,34 @@ public class AgentsControllerTests
     {
         // Arrange
         var agentId = Guid.NewGuid();
-        var expectedAgent = new Agent
+        var mockedAgent = new Agent
         {
             Id = agentId,
             Name = "Test Agent",
             Description = "Test Description",
-            Instructions = "Test Instructions",
-            Model = "gpt-4",
-            Temperature = 0.7f,
-            MaxTokens = 1000,
             IsActive = true
         };
 
+
+        var currentUser = new UserDto { Id = Guid.NewGuid(), Email = "test@example.com" };
+
+        _mockAuthService
+            .Setup(x => x.GetCurrentUserAsync())
+            .ReturnsAsync(currentUser);
+
         _mockAgentService
-            .Setup(x => x.GetAgentByIdAsync(agentId))
-            .ReturnsAsync(expectedAgent);
+            .Setup(x => x.GetVisibleAgentByIdAsync(agentId, currentUser.Id))
+            .ReturnsAsync(mockedAgent);
+
 
         // Act
-        var result = await _controller.GetAgentById(agentId);
+        var result = await _controller.GetAgent(agentId);
 
         // Assert
-        result.Should().BeOfType<OkObjectResult>();
-        var okResult = result as OkObjectResult;
-        okResult!.Value.Should().BeEquivalentTo(expectedAgent);
-        _mockAgentService.Verify(x => x.GetAgentByIdAsync(agentId), Times.Once);
+        result.Should().BeOfType<ActionResult<AgentDto>>()
+            .Which.Result.Should().BeOfType<OkObjectResult>()
+            .Which.Value.Should().BeEquivalentTo(mockedAgent);
+        _mockAgentService.Verify(x => x.GetVisibleAgentByIdAsync(agentId, currentUser.Id), Times.Once);
     }
 
     [Fact]
@@ -100,31 +116,35 @@ public class AgentsControllerTests
     {
         // Arrange
         var agentId = Guid.NewGuid();
+        var currentUser = new UserDto { Id = Guid.NewGuid(), Email = "test@example.com" };
+
+        _mockAuthService
+            .Setup(x => x.GetCurrentUserAsync())
+            .ReturnsAsync(currentUser);
 
         _mockAgentService
-            .Setup(x => x.GetAgentByIdAsync(agentId))
+            .Setup(x => x.GetVisibleAgentByIdAsync(agentId, currentUser.Id))
             .ReturnsAsync((Agent?)null);
 
         // Act
-        var result = await _controller.GetAgentById(agentId);
+        var result = await _controller.GetAgent(agentId);
 
         // Assert
-        result.Should().BeOfType<NotFoundResult>();
-        _mockAgentService.Verify(x => x.GetAgentByIdAsync(agentId), Times.Once);
+        result.Should().BeOfType<ActionResult<AgentDto>>()
+            .Which.Result.Should().BeOfType<NotFoundObjectResult>();
+        _mockAgentService.Verify(x => x.GetVisibleAgentByIdAsync(agentId, currentUser.Id), Times.Once);
     }
 
+    /// <summary>
+    /// CreateAgent_WithValidAgent_ShouldReturnCreatedAgent
+    /// </summary>
     [Fact]
     public async Task CreateAgent_WithValidAgent_ShouldReturnCreatedAgent()
     {
-        // Arrange
-        var createAgent = new Agent
+        var createAgent = new AgentDto
         {
             Name = "New Agent",
             Description = "New Description",
-            Instructions = "New Instructions",
-            Model = "gpt-4",
-            Temperature = 0.7f,
-            MaxTokens = 1000,
             IsActive = true
         };
 
@@ -133,64 +153,106 @@ public class AgentsControllerTests
             Id = Guid.NewGuid(),
             Name = createAgent.Name,
             Description = createAgent.Description,
-            Instructions = createAgent.Instructions,
-            Model = createAgent.Model,
-            Temperature = createAgent.Temperature,
-            MaxTokens = createAgent.MaxTokens,
             IsActive = createAgent.IsActive
         };
 
+        _mockMapper
+            .Setup(x => x.Map<Agent>(createAgent))
+            .Returns(expectedAgent);
+
         _mockAgentService
-            .Setup(x => x.CreateAgentAsync(createAgent))
+            .Setup(x => x.CreateAgentAsync(It.IsAny<Agent>()))
             .ReturnsAsync(expectedAgent);
 
-        // Act
+        var currentUser = new UserDto { Id = Guid.NewGuid(), Email = "test@example.com" };
+
+        _mockAuthService
+            .Setup(x => x.GetCurrentUserAsync())
+            .ReturnsAsync(currentUser);
+
         var result = await _controller.CreateAgent(createAgent);
 
-        // Assert
-        result.Should().BeOfType<CreatedAtActionResult>();
-        var createdResult = result as CreatedAtActionResult;
-        createdResult!.Value.Should().BeEquivalentTo(expectedAgent);
-        _mockAgentService.Verify(x => x.CreateAgentAsync(createAgent), Times.Once);
+        result.Result.Should().BeOfType<CreatedAtActionResult>();
+
+        ((CreatedAtActionResult)result.Result!).Value.Should().BeEquivalentTo(expectedAgent);
+
+
+        _mockAgentService.Verify(x => x.CreateAgentAsync(It.IsAny<Agent>()), Times.Once);
     }
 
+    /// <summary>
+    /// UpdateAgent_WithValidAgent_ShouldReturnUpdatedAgent
+    /// </summary>
     [Fact]
     public async Task UpdateAgent_WithValidAgent_ShouldReturnUpdatedAgent()
     {
+        var currentUser = new UserDto { Id = Guid.NewGuid(), Email = "test@example.com" };
+
+        _mockAuthService
+            .Setup(x => x.GetCurrentUserAsync())
+            .ReturnsAsync(currentUser);
+
+
+
         // Arrange
-        var updateAgent = new Agent
+        var updateAgent = new AgentDto
         {
+            CreatedByUserId = currentUser.Id,
             Id = Guid.NewGuid(),
             Name = "Updated Agent",
             Description = "Updated Description",
-            Instructions = "Updated Instructions",
-            Model = "gpt-4",
-            Temperature = 0.8f,
-            MaxTokens = 1500,
             IsActive = true
         };
 
-        _mockAgentService
-            .Setup(x => x.UpdateAgentAsync(updateAgent))
-            .ReturnsAsync(updateAgent);
+        var mockedAgent = new Agent
+        {
+            Id = updateAgent.Id!.Value,
+            Name = updateAgent.Name,
+            Description = updateAgent.Description,
+            IsActive = updateAgent.IsActive,
+            CreatedByUserId = currentUser.Id
+        };
 
-        // Act
-        var result = await _controller.UpdateAgent(updateAgent.Id, updateAgent);
+        _mockAgentService
+            .Setup(x => x.GetAgentByIdAsync(updateAgent.Id!.Value))
+            .ReturnsAsync(mockedAgent);
+
+        _mockMapper
+            .Setup(x => x.Map<Agent>(updateAgent))
+            .Returns(mockedAgent);
+
+        _mockAgentService
+            .Setup(x => x.UpdateAgentAsync(It.IsAny<Agent>()))
+            .ReturnsAsync(mockedAgent);
+
+        _mockMapper
+            .Setup(x => x.Map<AgentDto>(mockedAgent))
+            .Returns(updateAgent);
+
+        var result = await _controller.UpdateAgent(updateAgent.Id!.Value, updateAgent);
 
         // Assert
-        result.Should().BeOfType<OkObjectResult>();
-        var okResult = result as OkObjectResult;
-        okResult!.Value.Should().BeEquivalentTo(updateAgent);
-        _mockAgentService.Verify(x => x.UpdateAgentAsync(updateAgent), Times.Once);
+        result.Should().BeOfType<ActionResult<AgentDto>>()
+            .Which.Result.Should().BeOfType<OkObjectResult>()
+            .Which.Value.Should().BeEquivalentTo(mockedAgent);
+
+        _mockAgentService.Verify(x => x.UpdateAgentAsync(It.IsAny<Agent>()), Times.Once);
     }
 
     [Fact]
     public async Task UpdateAgent_WithMismatchedId_ShouldReturnBadRequest()
     {
+        var currentUser = new UserDto { Id = Guid.NewGuid(), Email = "test@example.com" };
+
+        _mockAuthService
+            .Setup(x => x.GetCurrentUserAsync())
+            .ReturnsAsync(currentUser);
+
         // Arrange
         var agentId = Guid.NewGuid();
-        var updateAgent = new Agent
+        var updateAgent = new AgentDto
         {
+            CreatedByUserId = currentUser.Id,
             Id = Guid.NewGuid(), // Different ID
             Name = "Updated Agent",
             Description = "Updated Description"
@@ -200,7 +262,7 @@ public class AgentsControllerTests
         var result = await _controller.UpdateAgent(agentId, updateAgent);
 
         // Assert
-        result.Should().BeOfType<BadRequestResult>();
+        result.Result.Should().BeOfType<NotFoundObjectResult>();
         _mockAgentService.Verify(x => x.UpdateAgentAsync(It.IsAny<Agent>()), Times.Never);
     }
 
@@ -209,6 +271,14 @@ public class AgentsControllerTests
     {
         // Arrange
         var agentId = Guid.NewGuid();
+
+        var currentUser = new UserDto { Id = Guid.NewGuid(), Email = "test@example.com" };
+        _mockAuthService.Setup(x => x.GetCurrentUserAsync()).ReturnsAsync(currentUser);
+
+
+        _mockAgentService
+            .Setup(x => x.GetAgentByIdAsync(agentId))
+            .ReturnsAsync(new Agent { Id = agentId, CreatedByUserId = currentUser.Id });
 
         _mockAgentService
             .Setup(x => x.DeleteAgentAsync(agentId))
@@ -228,6 +298,9 @@ public class AgentsControllerTests
         // Arrange
         var agentId = Guid.NewGuid();
 
+        var currentUser = new UserDto { Id = Guid.NewGuid(), Email = "test@example.com" };
+        _mockAuthService.Setup(x => x.GetCurrentUserAsync()).ReturnsAsync(currentUser);
+
         _mockAgentService
             .Setup(x => x.DeleteAgentAsync(agentId))
             .ReturnsAsync(false);
@@ -236,19 +309,15 @@ public class AgentsControllerTests
         var result = await _controller.DeleteAgent(agentId);
 
         // Assert
-        result.Should().BeOfType<NotFoundResult>();
-        _mockAgentService.Verify(x => x.DeleteAgentAsync(agentId), Times.Once);
+        result.Should().BeOfType<NotFoundObjectResult>();
+        _mockAgentService.Verify(x => x.DeleteAgentAsync(agentId), Times.Never);
     }
 
     [Fact]
     public async Task SearchAgents_WithValidCriteria_ShouldReturnMatchingAgents()
     {
         // Arrange
-        var searchCriteria = new AgentSearchCriteria
-        {
-            Name = "Test",
-            IsActive = true
-        };
+        var searchCriteria = "Test";
 
         var expectedAgents = new List<Agent>
         {
@@ -264,9 +333,9 @@ public class AgentsControllerTests
         var result = await _controller.SearchAgents(searchCriteria);
 
         // Assert
-        result.Should().BeOfType<OkObjectResult>();
-        var okResult = result as OkObjectResult;
-        okResult!.Value.Should().BeEquivalentTo(expectedAgents);
+        result.Should().BeOfType<ActionResult<IEnumerable<AgentDto>>>()
+            .Which.Result.Should().BeOfType<OkObjectResult>()
+            .Which.Value.Should().BeEquivalentTo(expectedAgents);
         _mockAgentService.Verify(x => x.SearchAgentsAsync(searchCriteria), Times.Once);
     }
 
@@ -274,50 +343,69 @@ public class AgentsControllerTests
     public async Task DuplicateAgent_WithValidId_ShouldReturnDuplicatedAgent()
     {
         // Arrange
-        var agentId = Guid.NewGuid();
-        var duplicatedAgent = new Agent
+        var duplicatedAgentDto = new AgentDto
         {
             Id = Guid.NewGuid(),
             Name = "Original Agent (Copy)",
             Description = "Original Description",
-            Instructions = "Original Instructions",
-            Model = "gpt-4",
-            Temperature = 0.7f,
-            MaxTokens = 1000,
             IsActive = true
         };
 
+        var createdAgent = new Agent
+        {
+            Id = Guid.NewGuid(),
+            Name = duplicatedAgentDto.Name,
+            Description = duplicatedAgentDto.Description,
+            IsActive = duplicatedAgentDto.IsActive
+        };
+
+        _mockMapper
+            .Setup(x => x.Map<Agent>(duplicatedAgentDto))
+            .Returns(createdAgent);
+
         _mockAgentService
-            .Setup(x => x.DuplicateAgentAsync(agentId))
-            .ReturnsAsync(duplicatedAgent);
+            .Setup(x => x.CreateAgentAsync(It.IsAny<Agent>()))
+            .ReturnsAsync(createdAgent);
+
+        var currentUser = new UserDto { Id = Guid.NewGuid(), Email = "test@example.com" };
+        _mockAuthService.Setup(x => x.GetCurrentUserAsync()).ReturnsAsync(currentUser);
 
         // Act
-        var result = await _controller.DuplicateAgent(agentId);
+        var result = await _controller.CreateAgent(duplicatedAgentDto);
 
         // Assert
-        result.Should().BeOfType<OkObjectResult>();
-        var okResult = result as OkObjectResult;
-        okResult!.Value.Should().BeEquivalentTo(duplicatedAgent);
-        _mockAgentService.Verify(x => x.DuplicateAgentAsync(agentId), Times.Once);
+        result.Result.Should().BeOfType<CreatedAtActionResult>();
+        ((CreatedAtActionResult)result.Result!).Value.Should().BeEquivalentTo(createdAgent);
+        _mockAgentService.Verify(x => x.CreateAgentAsync(It.IsAny<Agent>()), Times.Once);
     }
 
     [Fact]
     public async Task DuplicateAgent_WithInvalidId_ShouldReturnBadRequest()
     {
         // Arrange
-        var agentId = Guid.NewGuid();
+        var duplicatedAgentDto = new AgentDto
+        {
+            Id = Guid.NewGuid()
+        };
+
+        var agentToCreate = new Agent { Id = duplicatedAgentDto.Id!.Value };
+
+        _mockMapper
+            .Setup(x => x.Map<Agent>(duplicatedAgentDto))
+            .Returns(agentToCreate);
 
         _mockAgentService
-            .Setup(x => x.DuplicateAgentAsync(agentId))
+            .Setup(x => x.CreateAgentAsync(It.IsAny<Agent>()))
             .ThrowsAsync(new ArgumentException("Agent not found"));
 
+        var currentUser = new UserDto { Id = Guid.NewGuid(), Email = "test@example.com" };
+        _mockAuthService.Setup(x => x.GetCurrentUserAsync()).ReturnsAsync(currentUser);
+
         // Act
-        var result = await _controller.DuplicateAgent(agentId);
+        var result = await _controller.CreateAgent(duplicatedAgentDto);
 
         // Assert
-        result.Should().BeOfType<BadRequestObjectResult>();
-        var badRequestResult = result as BadRequestObjectResult;
-        badRequestResult!.Value.Should().Be("Agent not found");
-        _mockAgentService.Verify(x => x.DuplicateAgentAsync(agentId), Times.Once);
+        result.Result.Should().BeOfType<BadRequestObjectResult>();
+        _mockAgentService.Verify(x => x.CreateAgentAsync(It.IsAny<Agent>()), Times.Once);
     }
 }

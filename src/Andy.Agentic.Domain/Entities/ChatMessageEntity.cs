@@ -74,6 +74,11 @@ public class ChatMessageEntity
     public string? ToolName { get; set; }
 
     /// <summary>
+    ///     Model's thinking process or reasoning before generating the response.
+    /// </summary>
+    public string? Thinking { get; set; }
+
+    /// <summary>
     ///     Result of tool execution, if applicable.
     /// </summary>
     public string? ToolResult { get; set; }

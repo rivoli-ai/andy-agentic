@@ -8,7 +8,7 @@ public interface IChatService
 {
     IAsyncEnumerable<object> GetMessageStreamAsync(ChatMessage chatMessage, CancellationToken cancellationToken = default);
 
-    IAsyncEnumerable<string> SendMessageStreamAsync(ChatMessage chatMessage, CancellationToken cancellationToken = default);
+    IAsyncEnumerable<StreamingResult> SendMessageStreamAsync(ChatMessage chatMessage, CancellationToken cancellationToken = default);
     
     Task<IEnumerable<ChatHistory>> GetChatHistoryAsync(Guid agentId);
     Task<IEnumerable<ChatHistory>> GetChatHistoryBySessionAsync(string sessionId);
@@ -49,7 +49,7 @@ public interface IChatService
     Task<bool> ExportChatSessionAsync(string sessionId, string format = "json");
     Prompt? GetActivePrompt(Agent agent);
 
-    IAsyncEnumerable<string> SendMessageStreamRecursiveAsync(Agent agent, Prompt activePrompt,
+    IAsyncEnumerable<StreamingResult> SendMessageStreamRecursiveAsync(Agent agent, Prompt activePrompt,
         string messageContent, string sessionId,
         List<ToolExecutionLog>? toolResults = null, CancellationToken cancellationToken = default);
 }

@@ -1,24 +1,28 @@
 using Andy.Agentic.Application.Interfaces;
+using Andy.Agentic.Application.DTOs;
 using Andy.Agentic.Controllers;
 using Andy.Agentic.Domain.Models;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging;
 using System.Security.Claims;
+using Moq;
+using FluentAssertions;
+using AutoMapper;
 
 namespace Andy.Agentic.Tests.Controllers;
 
 public class LLMControllerTests
 {
     private readonly Mock<ILlmService> _mockLlmService;
-    private readonly Mock<ILogger<LLMController>> _mockLogger;
-    private readonly LLMController _controller;
+    private readonly Mock<IMapper> _mockMapper;
+    private readonly LlmController _controller;
 
     public LLMControllerTests()
     {
         _mockLlmService = new Mock<ILlmService>();
-        _mockLogger = new Mock<ILogger<LLMController>>();
-        _controller = new LLMController(_mockLlmService.Object, _mockLogger.Object);
+        _mockMapper = new Mock<IMapper>();
+        _controller = new LlmController(_mockLlmService.Object, _mockMapper.Object);
         
         // Setup controller context with user claims
         var claims = new List<Claim>
@@ -43,23 +47,24 @@ public class LLMControllerTests
     public async Task GetAllLlmConfigs_ShouldReturnAllConfigs()
     {
         // Arrange
-        var expectedConfigs = new List<LLMConfig>
+        var mockedConfigs = new List<LlmConfig>
         {
             new() { Id = Guid.NewGuid(), Name = "Config 1", Provider = LLMProviderType.OpenAi, ApiKey = "key1", IsActive = true },
-            new() { Id = Guid.NewGuid(), Name = "Config 2", Provider = LLMProviderType.Azure, ApiKey = "key2", IsActive = true }
+            new() { Id = Guid.NewGuid(), Name = "Config 2", Provider = LLMProviderType.AzureOpenAi, ApiKey = "key2", IsActive = true }
         };
 
         _mockLlmService
             .Setup(x => x.GetAllLlmConfigsAsync())
-            .ReturnsAsync(expectedConfigs);
+            .ReturnsAsync(mockedConfigs);
 
         // Act
-        var result = await _controller.GetAllLlmConfigs();
+        var result = await _controller.GetLlmConfigs();
 
         // Assert
-        result.Should().BeOfType<OkObjectResult>();
-        var okResult = result as OkObjectResult;
-        okResult!.Value.Should().BeEquivalentTo(expectedConfigs);
+        result.Should().BeOfType<ActionResult<IEnumerable<LlmConfigDto>>>()
+            .Which.Result.Should().BeOfType<OkObjectResult>()
+            .Which.Value.Should().BeEquivalentTo(mockedConfigs);
+
         _mockLlmService.Verify(x => x.GetAllLlmConfigsAsync(), Times.Once);
     }
 
@@ -68,7 +73,7 @@ public class LLMControllerTests
     {
         // Arrange
         var configId = Guid.NewGuid();
-        var expectedConfig = new LLMConfig
+        var mockedConfig = new LlmConfig
         {
             Id = configId,
             Name = "Test Config",
@@ -78,17 +83,31 @@ public class LLMControllerTests
             IsActive = true
         };
 
+        var expectedConfig = new LlmConfigDto
+        {
+            Id = configId,
+            Name = "Test Config",
+            Provider = "openai",
+            ApiKey = "test-key",
+            BaseUrl = "https://api.openai.com",
+            IsActive = true
+        };
+
         _mockLlmService
             .Setup(x => x.GetLlmConfigByIdAsync(configId))
-            .ReturnsAsync(expectedConfig);
+            .ReturnsAsync(mockedConfig);
+
+        _mockMapper
+            .Setup(x => x.Map<LlmConfigDto>(mockedConfig))
+            .Returns(expectedConfig);
 
         // Act
         var result = await _controller.GetLlmConfig(configId);
 
         // Assert
-        result.Should().BeOfType<OkObjectResult>();
-        var okResult = result as OkObjectResult;
-        okResult!.Value.Should().BeEquivalentTo(expectedConfig);
+        result.Should().BeOfType<ActionResult<LlmConfigDto>>()
+            .Which.Result.Should().BeOfType<OkObjectResult>()
+            .Which.Value.Should().BeEquivalentTo(mockedConfig);
         _mockLlmService.Verify(x => x.GetLlmConfigByIdAsync(configId), Times.Once);
     }
 
@@ -100,13 +119,14 @@ public class LLMControllerTests
 
         _mockLlmService
             .Setup(x => x.GetLlmConfigByIdAsync(configId))
-            .ReturnsAsync((LLMConfig?)null);
+            .ReturnsAsync((LlmConfig?)null);
 
         // Act
         var result = await _controller.GetLlmConfig(configId);
 
         // Assert
-        result.Should().BeOfType<NotFoundResult>();
+        result.Should().BeOfType<ActionResult<LlmConfigDto>>()
+            .Which.Result.Should().BeOfType<NotFoundObjectResult>();
         _mockLlmService.Verify(x => x.GetLlmConfigByIdAsync(configId), Times.Once);
     }
 
@@ -114,87 +134,88 @@ public class LLMControllerTests
     public async Task CreateLlmConfig_WithValidConfig_ShouldReturnCreatedConfig()
     {
         // Arrange
-        var createConfig = new LLMConfig
+        var createConfig = new LlmConfigDto
         {
             Name = "New Config",
-            Provider = LLMProviderType.OpenAi,
+            Provider = "openai",
             ApiKey = "new-key",
             BaseUrl = "https://api.openai.com",
             IsActive = true
         };
 
-        var expectedConfig = new LLMConfig
+        var mockedConfig = new LlmConfig
         {
             Id = Guid.NewGuid(),
             Name = createConfig.Name,
-            Provider = createConfig.Provider,
+            Provider = LLMProviderType.OpenAi,
             ApiKey = createConfig.ApiKey,
             BaseUrl = createConfig.BaseUrl,
             IsActive = createConfig.IsActive
         };
 
+        _mockMapper
+            .Setup(x => x.Map<LlmConfig>(createConfig))
+            .Returns(mockedConfig);
+
         _mockLlmService
-            .Setup(x => x.CreateLlmConfigAsync(createConfig))
-            .ReturnsAsync(expectedConfig);
+            .Setup(x => x.CreateLlmConfigAsync(It.IsAny<LlmConfig>()))
+            .ReturnsAsync(mockedConfig);
 
         // Act
         var result = await _controller.CreateLlmConfig(createConfig);
 
-        // Assert
-        result.Should().BeOfType<CreatedAtActionResult>();
-        var createdResult = result as CreatedAtActionResult;
-        createdResult!.Value.Should().BeEquivalentTo(expectedConfig);
-        _mockLlmService.Verify(x => x.CreateLlmConfigAsync(createConfig), Times.Once);
+
+        result.Result.Should().BeOfType<CreatedAtActionResult>();
+        ((CreatedAtActionResult)result.Result!).Value.Should().BeEquivalentTo(mockedConfig);
+
+        _mockLlmService.Verify(x => x.CreateLlmConfigAsync(It.IsAny<LlmConfig>()), Times.Once);
     }
 
     [Fact]
     public async Task UpdateLlmConfig_WithValidConfig_ShouldReturnUpdatedConfig()
     {
         // Arrange
-        var updateConfig = new LLMConfig
+        var updateConfig = new LlmConfigDto
         {
             Id = Guid.NewGuid(),
             Name = "Updated Config",
-            Provider = LLMProviderType.Azure,
+            Provider = "azure-openai",
             ApiKey = "updated-key",
             BaseUrl = "https://updated-api.azure.com",
             IsActive = true
         };
 
-        _mockLlmService
-            .Setup(x => x.UpdateLlmConfigAsync(updateConfig))
-            .ReturnsAsync(updateConfig);
-
-        // Act
-        var result = await _controller.UpdateLlmConfig(updateConfig.Id, updateConfig);
-
-        // Assert
-        result.Should().BeOfType<OkObjectResult>();
-        var okResult = result as OkObjectResult;
-        okResult!.Value.Should().BeEquivalentTo(updateConfig);
-        _mockLlmService.Verify(x => x.UpdateLlmConfigAsync(updateConfig), Times.Once);
-    }
-
-    [Fact]
-    public async Task UpdateLlmConfig_WithMismatchedId_ShouldReturnBadRequest()
-    {
-        // Arrange
-        var configId = Guid.NewGuid();
-        var updateConfig = new LLMConfig
+        var mockedConfig = new LlmConfig
         {
-            Id = Guid.NewGuid(), // Different ID
-            Name = "Updated Config",
-            Provider = LLMProviderType.OpenAi
+            Id = updateConfig.Id!.Value,
+            Name = updateConfig.Name,
+            Provider = LLMProviderType.AzureOpenAi,
+            ApiKey = updateConfig.ApiKey,
+            BaseUrl = updateConfig.BaseUrl,
+            IsActive = updateConfig.IsActive
         };
 
+        _mockMapper
+            .Setup(x => x.Map<LlmConfig>(updateConfig))
+            .Returns(mockedConfig);
+
+        _mockLlmService
+            .Setup(x => x.UpdateLlmConfigAsync(It.IsAny<LlmConfig>()))
+            .ReturnsAsync(mockedConfig);
+
+        _mockMapper
+            .Setup(x => x.Map<LlmConfigDto>(mockedConfig))
+            .Returns(updateConfig);
+
         // Act
-        var result = await _controller.UpdateLlmConfig(configId, updateConfig);
+        var result = await _controller.UpdateLlmConfig(updateConfig);
 
         // Assert
-        result.Should().BeOfType<BadRequestResult>();
-        _mockLlmService.Verify(x => x.UpdateLlmConfigAsync(It.IsAny<LLMConfig>()), Times.Never);
+        result.Should().BeOfType<ActionResult<LlmConfigDto>>()
+            .Which.Result.Should().BeOfType<OkObjectResult>()
+            .Which.Value.Should().BeEquivalentTo(mockedConfig);
+        _mockLlmService.Verify(x => x.UpdateLlmConfigAsync(It.IsAny<LlmConfig>()), Times.Once);
     }
-
     [Fact]
     public async Task DeleteLlmConfig_WithValidId_ShouldReturnNoContent()
     {
@@ -227,96 +248,73 @@ public class LLMControllerTests
         var result = await _controller.DeleteLlmConfig(configId);
 
         // Assert
-        result.Should().BeOfType<NotFoundResult>();
+        result.Should().BeOfType<NotFoundObjectResult>();
         _mockLlmService.Verify(x => x.DeleteLlmConfigAsync(configId), Times.Once);
-    }
-
-    [Fact]
-    public async Task GetActiveLlmConfigs_ShouldReturnOnlyActiveConfigs()
-    {
-        // Arrange
-        var expectedConfigs = new List<LLMConfig>
-        {
-            new() { Id = Guid.NewGuid(), Name = "Active Config 1", IsActive = true },
-            new() { Id = Guid.NewGuid(), Name = "Active Config 2", IsActive = true }
-        };
-
-        _mockLlmService
-            .Setup(x => x.GetActiveLlmConfigsAsync())
-            .ReturnsAsync(expectedConfigs);
-
-        // Act
-        var result = await _controller.GetActiveLlmConfigs();
-
-        // Assert
-        result.Should().BeOfType<OkObjectResult>();
-        var okResult = result as OkObjectResult;
-        okResult!.Value.Should().BeEquivalentTo(expectedConfigs);
-        _mockLlmService.Verify(x => x.GetActiveLlmConfigsAsync(), Times.Once);
-    }
-
-    [Fact]
-    public async Task GetLlmConfigsByProvider_WithValidProvider_ShouldReturnConfigsOfProvider()
-    {
-        // Arrange
-        var provider = LLMProviderType.OpenAi;
-        var expectedConfigs = new List<LLMConfig>
-        {
-            new() { Id = Guid.NewGuid(), Name = "OpenAI Config 1", Provider = LLMProviderType.OpenAi },
-            new() { Id = Guid.NewGuid(), Name = "OpenAI Config 2", Provider = LLMProviderType.OpenAi }
-        };
-
-        _mockLlmService
-            .Setup(x => x.GetLlmConfigsByProviderAsync(provider))
-            .ReturnsAsync(expectedConfigs);
-
-        // Act
-        var result = await _controller.GetLlmConfigsByProvider(provider);
-
-        // Assert
-        result.Should().BeOfType<OkObjectResult>();
-        var okResult = result as OkObjectResult;
-        okResult!.Value.Should().BeEquivalentTo(expectedConfigs);
-        _mockLlmService.Verify(x => x.GetLlmConfigsByProviderAsync(provider), Times.Once);
     }
 
     [Fact]
     public async Task TestConnection_WithValidConfigId_ShouldReturnSuccess()
     {
         // Arrange
-        var configId = Guid.NewGuid();
+        var testConnectionDto = new TestConnectionDto
+        {
+            BaseUrl = "https://api.openai.com",
+            ApiKey = "test-key",
+            Model = "gpt-4",
+            Provider = "openai"
+        };
+
+        var testResult = new TestConnectionResult
+        {
+            Success = true,
+            Message = "Connection successful",
+            Latency = 100
+        };
 
         _mockLlmService
-            .Setup(x => x.TestConnectionAsync(configId))
-            .ReturnsAsync(true);
+            .Setup(x => x.TestConnectionAsync(It.IsAny<TestConnection>()))
+            .ReturnsAsync(testResult);
 
         // Act
-        var result = await _controller.TestConnection(configId);
+        var result = await _controller.TestConnection(testConnectionDto);
 
         // Assert
-        result.Should().BeOfType<OkObjectResult>();
-        var okResult = result as OkObjectResult;
-        okResult!.Value.Should().Be(true);
-        _mockLlmService.Verify(x => x.TestConnectionAsync(configId), Times.Once);
+     result.Result.Should().BeOfType<OkObjectResult>();
+        ((OkObjectResult)result.Result!).Value.Should().BeEquivalentTo(testResult);
+        _mockLlmService.Verify(x => x.TestConnectionAsync(It.IsAny<TestConnection>()), Times.Once);
     }
 
     [Fact]
     public async Task TestConnection_WithInvalidConfigId_ShouldReturnFailure()
     {
         // Arrange
-        var configId = Guid.NewGuid();
+        var testConnectionDto = new TestConnectionDto
+        {
+            BaseUrl = "https://invalid-api.com",
+            ApiKey = "invalid-key",
+            Model = "gpt-4",
+            Provider = "openai"
+        };
+
+        var testResult = new TestConnectionResult
+        {
+            Success = false,
+            Message = "Connection failed",
+            Latency = 0
+        };
 
         _mockLlmService
-            .Setup(x => x.TestConnectionAsync(configId))
-            .ReturnsAsync(false);
+            .Setup(x => x.TestConnectionAsync(It.IsAny<TestConnection>()))
+            .ReturnsAsync(testResult);
 
         // Act
-        var result = await _controller.TestConnection(configId);
+        var result = await _controller.TestConnection(testConnectionDto);
 
         // Assert
-        result.Should().BeOfType<OkObjectResult>();
-        var okResult = result as OkObjectResult;
-        okResult!.Value.Should().Be(false);
-        _mockLlmService.Verify(x => x.TestConnectionAsync(configId), Times.Once);
+        result.Should().BeOfType<ActionResult<TestConnectionResultDto>>()
+            .Which.Result.Should().BeOfType<OkObjectResult>()
+            .Which.Value.Should().BeEquivalentTo(testResult);
+        _mockLlmService.Verify(x => x.TestConnectionAsync(It.IsAny<TestConnection>()), Times.Once);
     }
 }
+
