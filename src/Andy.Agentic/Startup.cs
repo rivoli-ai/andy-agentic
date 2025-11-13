@@ -16,6 +16,7 @@ using Andy.Agentic.Infrastructure.Semantic.Provider;
 using Andy.Agentic.Infrastructure.Services;
 using Andy.Agentic.Infrastructure.Services.ToolProviders;
 using Andy.Agentic.Infrastructure.UnitOfWorks;
+using Andy.Agentic.Mcps;
 using Microsoft.EntityFrameworkCore;
 using Npgsql;
 
@@ -40,6 +41,11 @@ public class Startup(IConfiguration configuration)
         ConfigureCoreServices(services);
         ConfigureHttpClient(services);
         ConfigureToolProviders(services);
+
+        services.AddMcpServer()
+            .WithHttpTransport()
+            .WithTools<AgentMcp>();
+
         services.AddSemanticKernelBuilder();
     }
 
@@ -281,6 +287,7 @@ public class Startup(IConfiguration configuration)
         app.UseAuthorization();
         app.MapControllers();
         app.MapHub<DocumentRagHub>("/documentRagHub");
+        app.MapMcp();
     }
 
     /// <summary>

@@ -3,6 +3,7 @@ using Andy.Agentic.Infrastructure.Semantic.Builder;
 using Andy.Agentic.Infrastructure.Semantic.Provider;
 using Andy.Agentic.Infrastructure.Semantic.Tools;
 using Andy.Agentic.Infrastructure.Semantic.Tools.Internal;
+using Andy.Agentic.Infrastructure.Semantic.Tools.Internal.Export;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace Andy.Agentic.Infrastructure.Semantic;
@@ -26,6 +27,14 @@ public static class ServiceCollectionExtensions
         services.AddScoped<ApiToolFactory>();
         services.AddScoped<McpToolFactory>();
         services.AddScoped<DocumentRagServiceTool>();
+        
+        // Register document export services
+        services.AddScoped<ExcelExporter>();
+        services.AddScoped<PdfExporter>();
+        services.AddScoped<WordExporter>();
+        services.AddScoped<DocumentExportFactory>();
+        services.AddScoped<DocumentExportTool>();
+        
         services.AddScoped<NativeFunctionToolFactory>();
         services.AddScoped<IToolManager, ToolManager>();
         services.AddScoped<SemanticKernelBuilder>();

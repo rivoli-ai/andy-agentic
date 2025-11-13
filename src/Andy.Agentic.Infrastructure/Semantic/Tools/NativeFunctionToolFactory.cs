@@ -11,12 +11,15 @@ public class NativeFunctionToolFactory : IToolFactory
 {
     private readonly ILogger<NativeFunctionToolFactory>? _logger;
     private readonly DocumentRagServiceTool _documentRagServiceTool;
+    private readonly DocumentExportTool _documentExportTool;
 
     public NativeFunctionToolFactory(
         DocumentRagServiceTool documentRagServiceTool,
+        DocumentExportTool documentExportTool,
         ILogger<NativeFunctionToolFactory>? logger = null)
     {
         _documentRagServiceTool = documentRagServiceTool;
+        _documentExportTool = documentExportTool;
         _logger = logger;
     }
     [Experimental("SKEXP0130")]
@@ -29,6 +32,7 @@ public class NativeFunctionToolFactory : IToolFactory
             return tool.Name.ToLowerInvariant() switch
             {
                 "search" => CreateSearchTool(agent, tool),
+                "export" => CreateExportTool(tool),
                 _ => CreateGenericNativeTool(tool)
             };
         }
@@ -53,6 +57,25 @@ public class NativeFunctionToolFactory : IToolFactory
         return KernelFunctionFactory.CreateFromMethod(
             async (string query) => 
                 await _documentRagServiceTool.SearchDocumentsAsync(query, agent),
+            functionName: config.Name,
+            description: config.Description
+        );
+    }
+
+    /// <summary>
+    /// Creates an export tool function using DocumentExportTool.
+    /// </summary>
+    /// <param name="config">The tool configuration.</param>
+    /// <returns>A KernelFunction for document export.</returns>
+    [Experimental("SKEXP0130")]
+    private KernelFunction CreateExportTool(Tool config)
+    {
+        _logger?.LogInformation("Creating Export tool with DocumentExportTool functionality");
+
+        // Pass the tool configuration to access apiUrl from config
+        return KernelFunctionFactory.CreateFromMethod(
+            async (string content, string format, string? title) =>
+                await _documentExportTool.ExportDocumentAsync(content, format, title, config),
             functionName: config.Name,
             description: config.Description
         );
