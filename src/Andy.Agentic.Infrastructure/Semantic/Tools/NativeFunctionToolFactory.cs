@@ -32,7 +32,7 @@ public class NativeFunctionToolFactory : IToolFactory
             return tool.Name.ToLowerInvariant() switch
             {
                 "search" => CreateSearchTool(agent, tool),
-                "export" => CreateExportTool(tool),
+                "export" => CreateExportTool(agent, tool),
                 _ => CreateGenericNativeTool(tool)
             };
         }
@@ -65,17 +65,20 @@ public class NativeFunctionToolFactory : IToolFactory
     /// <summary>
     /// Creates an export tool function using DocumentExportTool.
     /// </summary>
+    /// <param name="agent">The agent executing the tool.</param>
     /// <param name="config">The tool configuration.</param>
     /// <returns>A KernelFunction for document export.</returns>
     [Experimental("SKEXP0130")]
-    private KernelFunction CreateExportTool(Tool config)
+    private KernelFunction CreateExportTool(Agent agent, Tool config)
     {
         _logger?.LogInformation("Creating Export tool with DocumentExportTool functionality");
 
-        // Pass the tool configuration to access apiUrl from config
+        // Pass the tool configuration and agent to access apiUrl from config and agentId
+        // Note: sessionId is not available in the function signature, so we pass null
+        // It could be obtained from a context service in the future if needed
         return KernelFunctionFactory.CreateFromMethod(
             async (string content, string format, string? title) =>
-                await _documentExportTool.ExportDocumentAsync(content, format, title, config),
+                await _documentExportTool.ExportDocumentAsync(content, format, title, config, agent, null),
             functionName: config.Name,
             description: config.Description
         );

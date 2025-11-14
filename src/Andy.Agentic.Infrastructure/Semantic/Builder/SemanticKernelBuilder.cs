@@ -123,15 +123,15 @@ public class SemanticKernelBuilder : ISemanticKernelBuilder
     /// <param name="config">The configuration for the LLM.</param>
     /// <param name="request">The request containing details for the kernel build.</param>
     /// <param name="toolExecutionRecorder">The recorder for tool execution.</param>
+    /// <param name="user"></param>
     /// <returns>
     /// Returns a KernelResponse containing the built kernel and chat history.
     /// </returns>
-    public KernelResponse BuildKernelAsync(
-            Agent agent,
-            string session,
-            LlmConfig config,
-            LlmRequest request,
-            ToolExecutionRecorder toolExecutionRecorder)
+    public KernelResponse BuildKernelAsync(Agent agent,
+        string session,
+        LlmConfig config,
+        LlmRequest request,
+        ToolExecutionRecorder toolExecutionRecorder)
     {
         _logger?.LogInformation("Building Semantic Kernel...");
 

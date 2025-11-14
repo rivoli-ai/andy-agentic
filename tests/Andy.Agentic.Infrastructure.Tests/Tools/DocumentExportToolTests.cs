@@ -1,3 +1,6 @@
+using Andy.Agentic.Domain.Entities;
+using Andy.Agentic.Domain.Interfaces;
+using Andy.Agentic.Domain.Interfaces.Database;
 using Andy.Agentic.Domain.Models;
 using Andy.Agentic.Infrastructure.Semantic.Tools.Internal;
 using Andy.Agentic.Infrastructure.Semantic.Tools.Internal.Export;
@@ -18,6 +21,8 @@ public class DocumentExportToolTests
     private readonly Mock<ILogger<ExcelExporter>> _mockExcelLogger;
     private readonly Mock<ILogger<PdfExporter>> _mockPdfLogger;
     private readonly Mock<ILogger<WordExporter>> _mockWordLogger;
+    private readonly Mock<IDocumentExportRepository> _mockRepository;
+    private readonly Mock<IDataBaseService> _mockDatabaseService;
     private readonly Tool _toolConfig;
 
     /// <summary>
@@ -30,6 +35,8 @@ public class DocumentExportToolTests
         _mockExcelLogger = new Mock<ILogger<ExcelExporter>>();
         _mockPdfLogger = new Mock<ILogger<PdfExporter>>();
         _mockWordLogger = new Mock<ILogger<WordExporter>>();
+        _mockRepository = new Mock<IDocumentExportRepository>();
+        _mockDatabaseService = new Mock<IDataBaseService>();
 
         // Setup tool configuration with apiUrl
         _toolConfig = new Tool
@@ -40,6 +47,19 @@ public class DocumentExportToolTests
             Type = "InternalTool",
             Configuration = "{\"apiUrl\":\"https://localhost\"}"
         };
+
+        // Setup repository mock to return the entity with an ID when AddAsync is called
+        _mockRepository
+            .Setup(r => r.AddAsync(It.IsAny<DocumentExportEntity>()))
+            .ReturnsAsync((DocumentExportEntity entity) =>
+            {
+                // Set the ID if not already set
+                if (entity.Id == Guid.Empty)
+                {
+                    entity.Id = Guid.NewGuid();
+                }
+                return entity;
+            });
 
         var excelExporter = new ExcelExporter(_mockExcelLogger.Object);
         var pdfExporter = new PdfExporter(_mockPdfLogger.Object);
@@ -52,7 +72,12 @@ public class DocumentExportToolTests
             _mockFactoryLogger.Object
         );
 
-        _tool = new DocumentExportTool(factory, _mockLogger.Object);
+        _tool = new DocumentExportTool(
+            factory,
+            _mockRepository.Object,
+            _mockDatabaseService.Object,
+            _mockLogger.Object,
+            null); // No HttpContextAccessor for tests
     }
 
     /// <summary>
@@ -77,6 +102,9 @@ public class DocumentExportToolTests
         Assert.Contains("[Click here to download", result);
         Assert.Contains("https://localhost/api/exports/", result);
         Assert.Contains("has been exported successfully", result);
+        
+        // Verify repository was called
+        _mockRepository.Verify(r => r.AddAsync(It.IsAny<DocumentExportEntity>()), Times.Once);
     }
 
     /// <summary>
@@ -101,6 +129,9 @@ public class DocumentExportToolTests
         Assert.Contains("[Click here to download", result);
         Assert.Contains("https://localhost/api/exports/", result);
         Assert.Contains("has been exported successfully", result);
+        
+        // Verify repository was called
+        _mockRepository.Verify(r => r.AddAsync(It.IsAny<DocumentExportEntity>()), Times.Once);
     }
 
     /// <summary>
@@ -125,6 +156,9 @@ public class DocumentExportToolTests
         Assert.Contains("[Click here to download", result);
         Assert.Contains("https://localhost/api/exports/", result);
         Assert.Contains("has been exported successfully", result);
+        
+        // Verify repository was called
+        _mockRepository.Verify(r => r.AddAsync(It.IsAny<DocumentExportEntity>()), Times.Once);
     }
 
     /// <summary>
@@ -231,7 +265,12 @@ public class DocumentExportToolTests
         Assert.Contains("**📥 Download:**", result);
         Assert.Contains("[Click here to download", result);
         Assert.Contains("](https://localhost/api/exports/", result);
-        Assert.Contains(".pdf)", result);
+        // URL now uses GUID instead of filename, so we check for the pattern
+        // GUID format: 8-4-4-4-12 hex characters
+        Assert.Matches(@"\]\(https://localhost/api/exports/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\)", result);
+        
+        // Verify repository was called
+        _mockRepository.Verify(r => r.AddAsync(It.IsAny<DocumentExportEntity>()), Times.Once);
     }
 }
 

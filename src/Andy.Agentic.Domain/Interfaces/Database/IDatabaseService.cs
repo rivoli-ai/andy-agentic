@@ -79,4 +79,6 @@ public interface IDataBaseService
 
     // Agent-specific database operations
     Task<Agent?> GetAgentWithConfigAsync(Guid agentId);
+
+    Task<Guid> GetUserIdByAzureId(string azureId);
 }

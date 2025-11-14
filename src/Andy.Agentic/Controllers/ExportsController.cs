@@ -1,3 +1,4 @@
+using Andy.Agentic.Domain.Interfaces;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.StaticFiles;
 
@@ -11,61 +12,58 @@ namespace Andy.Agentic.Controllers;
 public class ExportsController : ControllerBase
 {
     private readonly ILogger<ExportsController> _logger;
-    private readonly string _exportDirectory;
+    private readonly IDocumentExportRepository _documentExportRepository;
     private readonly FileExtensionContentTypeProvider _contentTypeProvider;
 
-    public ExportsController(ILogger<ExportsController> logger)
+    public ExportsController(
+        ILogger<ExportsController> logger,
+        IDocumentExportRepository documentExportRepository)
     {
         _logger = logger;
-        _exportDirectory = Path.Combine(Directory.GetCurrentDirectory(), "exports");
+        _documentExportRepository = documentExportRepository;
         _contentTypeProvider = new FileExtensionContentTypeProvider();
     }
 
     /// <summary>
-    /// Downloads an exported document
+    /// Downloads an exported document by ID
     /// </summary>
-    /// <param name="fileName">The filename of the exported document</param>
+    /// <param name="id">The ID of the exported document</param>
     /// <returns>The file content</returns>
-    [HttpGet("{fileName}")]
-    public async Task<IActionResult> DownloadExport(string fileName)
+    [HttpGet("{id}")]
+    public async Task<IActionResult> DownloadExport(Guid id)
     {
         try
         {
-            // Validate filename to prevent directory traversal attacks
-            if (string.IsNullOrWhiteSpace(fileName) || 
-                fileName.Contains("..") || 
-                fileName.Contains("/") || 
-                fileName.Contains("\\"))
+            var documentExport = await _documentExportRepository.GetByIdAsync(id);
+            
+            if (documentExport == null)
             {
-                _logger.LogWarning("Invalid filename requested: {FileName}", fileName);
-                return BadRequest("Invalid filename");
-            }
-
-            var filePath = Path.Combine(_exportDirectory, fileName);
-
-            if (!System.IO.File.Exists(filePath))
-            {
-                _logger.LogWarning("Export file not found: {FilePath}", filePath);
+                _logger.LogWarning("Export document not found: {Id}", id);
                 return NotFound("Exported document not found");
             }
 
-            // Get the content type
-            if (!_contentTypeProvider.TryGetContentType(fileName, out var contentType))
+            // Get the content type based on file extension
+            if (!_contentTypeProvider.TryGetContentType(documentExport.FileName, out var contentType))
             {
-                contentType = "application/octet-stream";
+                // Default content types based on format
+                contentType = documentExport.Format.ToLowerInvariant() switch
+                {
+                    "excel" or "xlsx" => "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    "pdf" => "application/pdf",
+                    "word" or "docx" => "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                    _ => "application/octet-stream"
+                };
             }
 
-            // Read the file
-            var fileBytes = await System.IO.File.ReadAllBytesAsync(filePath);
-
-            _logger.LogInformation("Serving export file: {FileName}, Size: {Size} bytes", fileName, fileBytes.Length);
+            _logger.LogInformation("Serving export file: {FileName}, Size: {Size} bytes, ID: {Id}", 
+                documentExport.FileName, documentExport.Size, id);
 
             // Return the file with proper content disposition for download
-            return File(fileBytes, contentType, fileName);
+            return File(documentExport.Content, contentType, documentExport.FileName);
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error serving export file: {FileName}", fileName);
+            _logger.LogError(ex, "Error serving export file: {Id}", id);
             return StatusCode(500, "An error occurred while downloading the exported document");
         }
     }
@@ -73,35 +71,30 @@ public class ExportsController : ControllerBase
     /// <summary>
     /// Cleans up old exported documents (optional maintenance endpoint)
     /// </summary>
-    /// <param name="olderThanHours">Delete files older than specified hours (default: 24)</param>
-    /// <returns>Number of files deleted</returns>
+    /// <param name="olderThanHours">Delete documents older than specified hours (default: 24)</param>
+    /// <returns>Number of documents deleted</returns>
     [HttpDelete("cleanup")]
-    public IActionResult CleanupOldExports([FromQuery] int olderThanHours = 24)
+    public async Task<IActionResult> CleanupOldExports([FromQuery] int olderThanHours = 24)
     {
         try
         {
-            if (!Directory.Exists(_exportDirectory))
-            {
-                return Ok(new { deletedCount = 0, message = "Export directory does not exist" });
-            }
-
             var cutoffTime = DateTime.UtcNow.AddHours(-olderThanHours);
-            var files = Directory.GetFiles(_exportDirectory);
+            var allExports = await _documentExportRepository.GetAllAsync();
+            var oldExports = allExports.Where(e => e.CreatedAt < cutoffTime).ToList();
             var deletedCount = 0;
 
-            foreach (var file in files)
+            foreach (var export in oldExports)
             {
-                var fileInfo = new FileInfo(file);
-                if (fileInfo.CreationTimeUtc < cutoffTime)
+                var deleted = await _documentExportRepository.DeleteAsync(export.Id);
+                if (deleted)
                 {
-                    System.IO.File.Delete(file);
                     deletedCount++;
-                    _logger.LogInformation("Deleted old export file: {FileName}", fileInfo.Name);
+                    _logger.LogInformation("Deleted old export: {FileName}, ID: {Id}", export.FileName, export.Id);
                 }
             }
 
-            _logger.LogInformation("Cleanup completed: {Count} files deleted", deletedCount);
-            return Ok(new { deletedCount, message = $"Deleted {deletedCount} files older than {olderThanHours} hours" });
+            _logger.LogInformation("Cleanup completed: {Count} documents deleted", deletedCount);
+            return Ok(new { deletedCount, message = $"Deleted {deletedCount} documents older than {olderThanHours} hours" });
         }
         catch (Exception ex)
         {

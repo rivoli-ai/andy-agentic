@@ -179,6 +179,7 @@ public class Startup(IConfiguration configuration)
         services.AddScoped<IUserRepository, UserRepository>();
         services.AddScoped<IDocumentRepository, DocumentRepository>();
         services.AddScoped<IAgentDocumentRepository, AgentDocumentRepository>();
+        services.AddScoped<IDocumentExportRepository, DocumentExportRepository>();
     }
 
     /// <summary>

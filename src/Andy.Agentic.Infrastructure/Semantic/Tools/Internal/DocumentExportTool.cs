@@ -1,7 +1,13 @@
+using Andy.Agentic.Domain.Entities;
+using Andy.Agentic.Domain.Interfaces;
+using Andy.Agentic.Domain.Models;
+using Andy.Agentic.Infrastructure.Repositories;
+using Andy.Agentic.Infrastructure.Semantic.Tools.Internal.Export;
+using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.Logging;
 using System.ComponentModel;
 using System.Text.Json;
-using Andy.Agentic.Infrastructure.Semantic.Tools.Internal.Export;
-using Microsoft.Extensions.Logging;
+using Andy.Agentic.Domain.Interfaces.Database;
 
 namespace Andy.Agentic.Infrastructure.Semantic.Tools.Internal;
 
@@ -9,27 +15,14 @@ namespace Andy.Agentic.Infrastructure.Semantic.Tools.Internal;
 /// Tool that provides document export functionality for converting responses to various formats.
 /// Supports exporting to Excel, PDF, and Word documents.
 /// </summary>
-public class DocumentExportTool
-{
-    private readonly DocumentExportFactory _exportFactory;
-    private readonly ILogger<DocumentExportTool>? _logger;
-    private readonly string _exportDirectory;
-
-    public DocumentExportTool(
+public class  DocumentExportTool(
         DocumentExportFactory exportFactory,
-        ILogger<DocumentExportTool>? logger = null)
+        IDocumentExportRepository documentExportRepository,
+        IDataBaseService databseService,
+        ILogger<DocumentExportTool>? logger,
+        IHttpContextAccessor? httpContextAccessor)
     {
-        _exportFactory = exportFactory;
-        _logger = logger;
-        
-        // Create exports directory in the application root
-        _exportDirectory = Path.Combine(Directory.GetCurrentDirectory(), "exports");
-        if (!Directory.Exists(_exportDirectory))
-        {
-            Directory.CreateDirectory(_exportDirectory);
-            _logger?.LogInformation("Created exports directory at {Path}", _exportDirectory);
-        }
-    }
+      
 
     /// <summary>
     /// Exports content to the specified document format.
@@ -38,13 +31,17 @@ public class DocumentExportTool
     /// <param name="format">The document format (excel, pdf, or word)</param>
     /// <param name="title">The title of the document (optional, defaults to 'Exported Document')</param>
     /// <param name="toolConfig">The tool configuration containing apiUrl</param>
+    /// <param name="agent">The agent executing the tool (optional)</param>
+    /// <param name="sessionId">The session ID where the export was generated (optional)</param>
     /// <returns>A markdown formatted message with download link</returns>
     [Description("Exports content to a document format (excel, pdf, or word). Returns a markdown link for download.")]
     public async Task<string> ExportDocumentAsync(
         [Description("The content to export to the document")] string content,
         [Description("The document format: excel, pdf, or word")] string format,
         [Description("The title of the document")] string? title = null,
-        Andy.Agentic.Domain.Models.Tool? toolConfig = null)
+        Tool? toolConfig = null,
+        Agent? agent = null,
+        string? sessionId = null)
     {
         try
         {
@@ -60,35 +57,52 @@ public class DocumentExportTool
                     if (configDict != null && configDict.TryGetValue("apiUrl", out var url))
                     {
                         apiUrl = url;
-                        _logger?.LogInformation("Using API URL from tool configuration: {ApiUrl}", apiUrl);
+                        logger?.LogInformation("Using API URL from tool configuration: {ApiUrl}", apiUrl);
                     }
                 }
                 catch (Exception ex)
                 {
-                    _logger?.LogWarning(ex, "Failed to parse tool configuration, using default API URL");
+                    logger?.LogWarning(ex, "Failed to parse tool configuration, using default API URL");
                 }
             }
             
-            _logger?.LogInformation(
+            logger?.LogInformation(
                 "Exporting document - Format: {Format}, Title: {Title}, Content Length: {Length}, API URL: {ApiUrl}",
                 format, documentTitle, content.Length, apiUrl);
 
-            var exporter = _exportFactory.GetExporter(format);
+            var exporter = exportFactory.GetExporter(format);
             var documentBytes = await exporter.ExportAsync(content, documentTitle);
 
             // Generate unique filename
-            var fileName = $"{SanitizeFileName(documentTitle)}_{Guid.NewGuid():N}{exporter.FileExtension}";
-            var filePath = Path.Combine(_exportDirectory, fileName);
+            var fileName = $"{SanitizeFileName(documentTitle)}{Guid.NewGuid():N}{exporter.FileExtension}";
 
-            // Save file to disk
-            await File.WriteAllBytesAsync(filePath, documentBytes);
+
+            var userId =await GetCurrentUserAsync();
+
+            // Create document export entity
+            var documentExport = new DocumentExportEntity
+            {
+                Title = documentTitle,
+                Format = format.ToLowerInvariant(),
+                FileName = fileName,
+                Content = documentBytes,
+                Size = documentBytes.Length,
+                AgentId = agent?.Id,
+                SessionId = sessionId,
+                CreatedByUserId = userId,
+                CreatedAt = DateTime.UtcNow
+            };
+
+            // Save to database
+            await documentExportRepository.AddAsync(documentExport);
 
             // Build full download URL using apiUrl from tool configuration
-            var downloadUrl = $"{apiUrl}/api/exports/{Uri.EscapeDataString(fileName)}";
+            // Use the document export ID instead of filename for better security
+            var downloadUrl = $"{apiUrl}/api/exports/{documentExport.Id}";
             
-            _logger?.LogInformation(
-                "Document exported successfully - Format: {Format}, Size: {Size} bytes, File: {FileName}, URL: {Url}",
-                format, documentBytes.Length, fileName, downloadUrl);
+            logger?.LogInformation(
+                "Document exported successfully - Format: {Format}, Size: {Size} bytes, File: {FileName}, ID: {Id}, URL: {Url}",
+                format, documentBytes.Length, fileName, documentExport.Id, downloadUrl);
 
             // Return markdown formatted message with download link
             var result = $"📄 **Document Export Complete**\n\n" +
@@ -102,9 +116,9 @@ public class DocumentExportTool
         }
         catch (Exception ex)
         {
-            _logger?.LogError(ex, "Error exporting document to format: {Format}", format);
+            logger?.LogError(ex, "Error exporting document to format: {Format}", format);
             return $"Error occurred while exporting document: {ex.Message}\n" +
-                   $"Supported formats are: {string.Join(", ", _exportFactory.GetSupportedFormats())}";
+                   $"Supported formats are: {string.Join(", ", exportFactory.GetSupportedFormats())}";
         }
     }
 
@@ -114,7 +128,7 @@ public class DocumentExportTool
     private string SanitizeFileName(string fileName)
     {
         var invalidChars = Path.GetInvalidFileNameChars();
-        var sanitized = string.Join("_", fileName.Split(invalidChars, StringSplitOptions.RemoveEmptyEntries));
+        var sanitized = string.Join("", fileName.Split(invalidChars, StringSplitOptions.RemoveEmptyEntries));
         return string.IsNullOrWhiteSpace(sanitized) ? "document" : sanitized;
     }
 
@@ -143,18 +157,43 @@ public class DocumentExportTool
     {
         try
         {
-            var formats = _exportFactory.GetSupportedFormats();
+            var formats = exportFactory.GetSupportedFormats();
             var result = "Supported Document Export Formats:\n" +
                         string.Join("\n", formats.Select(f => $"- {f.ToUpper()}"));
             
-            _logger?.LogInformation("Listed supported export formats");
+            logger?.LogInformation("Listed supported export formats");
             return Task.FromResult(result);
         }
         catch (Exception ex)
         {
-            _logger?.LogError(ex, "Error listing supported formats");
+            logger?.LogError(ex, "Error listing supported formats");
             return Task.FromResult($"Error occurred: {ex.Message}");
         }
     }
+
+    /// <summary>
+    /// Get the current authenticated user
+    /// </summary>
+    /// <returns>The current user DTO or null if not authenticated</returns>
+    public async Task<Guid?> GetCurrentUserAsync()
+    {
+        var httpContext = httpContextAccessor?.HttpContext;
+        if (httpContext?.User?.Identity?.IsAuthenticated != true)
+        {
+            return null;
+        }
+
+        var azureAdId = httpContext.User.FindFirst("oid")?.Value ??
+                        httpContext.User.FindFirst("http://schemas.microsoft.com/identity/claims/objectidentifier")?.Value;
+
+        if (string.IsNullOrEmpty(azureAdId))
+        {
+            return null;
+        }
+
+        var user = await databseService.GetUserIdByAzureId(azureAdId);
+        return user;
+    }
+
 }
 

@@ -25,6 +25,7 @@ namespace Andy.Agentic.Infrastructure.Data
         public DbSet<UserEntity> Users { get; set; }
         public DbSet<DocumentEntity> Documents { get; set; }
         public DbSet<AgentDocumentEntity> AgentDocuments { get; set; }
+        public DbSet<DocumentExportEntity> DocumentExports { get; set; }
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
@@ -168,10 +169,9 @@ namespace Andy.Agentic.Infrastructure.Data
                 .HasForeignKey(d => d.CreatedByUserId)
                 .OnDelete(DeleteBehavior.Restrict);
 
-            // Configure BinaryContent as LONGBLOB for MySQL
-            modelBuilder.Entity<DocumentEntity>()
-                .Property(d => d.BinaryContent)
-                .HasColumnType("LONGBLOB");
+            // BinaryContent will use bytea for PostgreSQL (default) or LONGBLOB for MySQL
+            // EF Core automatically maps byte[] to the appropriate type based on the database provider
+            // For PostgreSQL, bytea is the default type for byte[] properties
 
             // AgentDocument entity configuration
             modelBuilder.Entity<AgentDocumentEntity>()
@@ -188,6 +188,27 @@ namespace Andy.Agentic.Infrastructure.Data
 
             modelBuilder.Entity<AgentDocumentEntity>()
                 .HasIndex(ad => new { ad.AgentId, ad.DocumentId })
+                .IsUnique();
+
+            // DocumentExport entity configuration
+            modelBuilder.Entity<DocumentExportEntity>()
+                .HasOne(de => de.CreatedByUser)
+                .WithMany()
+                .HasForeignKey(de => de.CreatedByUserId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            modelBuilder.Entity<DocumentExportEntity>()
+                .HasOne(de => de.Agent)
+                .WithMany()
+                .HasForeignKey(de => de.AgentId)
+                .OnDelete(DeleteBehavior.SetNull);
+
+            // Content will use bytea for PostgreSQL (default) or LONGBLOB for MySQL
+            // EF Core automatically maps byte[] to the appropriate type based on the database provider
+            // For PostgreSQL, bytea is the default type for byte[] properties
+
+            modelBuilder.Entity<DocumentExportEntity>()
+                .HasIndex(de => de.FileName)
                 .IsUnique();
 
         }

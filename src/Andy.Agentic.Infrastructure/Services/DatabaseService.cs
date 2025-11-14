@@ -1,5 +1,6 @@
 using System.Text.Json;
 using Andy.Agentic.Domain.Entities;
+using Andy.Agentic.Domain.Interfaces;
 using Andy.Agentic.Domain.Interfaces.Database;
 using Andy.Agentic.Domain.Models;
 using Andy.Agentic.Domain.Queries.SearchCriteria;
@@ -14,6 +15,7 @@ public class DatabaseService(
     IChatRepository chatRepository,
     IToolExecutionRepository toolExecutionRepository,
     ITagRepository tagRepository,
+    IUserRepository userRepository,
     IUnitOfWork uow,
     IMapper mapper)
     : IDataBaseService
@@ -520,5 +522,12 @@ public class DatabaseService(
     {
         var agent = await agentRepository.GetWithConfigAsync(agentId);
         return agent != null ? mapper.Map<Agent>(agent) : null;
+    }
+
+    public async Task<Guid> GetUserIdByAzureId(string azureId)
+    {
+        var user =  await userRepository.GetByAzureAdIdAsync(azureId);
+
+        return user.Id;
     }
 }
