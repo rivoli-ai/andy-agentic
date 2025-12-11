@@ -39,7 +39,9 @@ public class EntityMapperProfile : Profile
             .ReverseMap();
 
         CreateMap<ChatMessageEntity, ChatMessage>()
-            .ReverseMap();
+            .ForMember(dest => dest.Images, opt => opt.MapFrom(src => DeserializeImages(src.Images)))
+            .ReverseMap()
+            .ForMember(dest => dest.Images, opt => opt.MapFrom(src => SerializeImages(src.Images)));
 
         CreateMap<AgentToolEntity, AgentTool>()
             .ReverseMap();
@@ -74,7 +76,8 @@ public class EntityMapperProfile : Profile
           .ForMember(dest => dest.AgentName, opt => opt.MapFrom(src => src.AgentName ?? string.Empty))
           .ForMember(dest => dest.AgentId, opt => opt.MapFrom(src => src.AgentId ?? Guid.Empty))
           .ForMember(dest => dest.SessionId, opt => opt.MapFrom(src => src.SessionId ?? string.Empty))
-          .ForMember(dest => dest.TokenCount, opt => opt.MapFrom(src => src.TokenCount ?? 0));
+          .ForMember(dest => dest.TokenCount, opt => opt.MapFrom(src => src.TokenCount ?? 0))
+          .ForMember(dest => dest.Images, opt => opt.MapFrom(src => DeserializeImages(src.Images)));
 
         CreateMap<ChatMessageEntity, ChatMessagePreview>();
 
@@ -128,6 +131,36 @@ public class EntityMapperProfile : Profile
         catch
         {
             return new Dictionary<string, object>();
+        }
+    }
+
+    private static string? SerializeImages(List<ChatImage>? images)
+    {
+        if (images == null || !images.Any())
+            return null;
+
+        try
+        {
+            return JsonSerializer.Serialize(images);
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static List<ChatImage>? DeserializeImages(string? imagesJson)
+    {
+        if (string.IsNullOrEmpty(imagesJson))
+            return null;
+
+        try
+        {
+            return JsonSerializer.Deserialize<List<ChatImage>>(imagesJson);
+        }
+        catch
+        {
+            return null;
         }
     }
 }

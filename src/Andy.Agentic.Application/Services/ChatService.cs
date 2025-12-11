@@ -58,9 +58,17 @@ public class ChatService(
 
         var sessionId = chatMessage.SessionId ??  await databaseResourceAccess.CreateNewChatSessionAsync(chatMessage.AgentId.Value);
 
+        // Debug: Log images count
+        Console.WriteLine($"[ChatService] Images count before sending: {chatMessage.Images?.Count ?? 0}");
+        if (chatMessage.Images != null && chatMessage.Images.Any())
+        {
+            Console.WriteLine($"[ChatService] First image MIME type: {chatMessage.Images[0].MimeType}");
+            Console.WriteLine($"[ChatService] First image data length: {chatMessage.Images[0].Data?.Length ?? 0}");
+        }
+
         await SaveUserMessageAsync(chatMessage, sessionId);
 
-        await foreach (var chunk in SendMessageStreamRecursiveAsync(agent, activePrompt, chatMessage.Content, sessionId, null, cancellationToken))
+        await foreach (var chunk in SendMessageStreamRecursiveAsync(agent, activePrompt, chatMessage.Content, sessionId, null, chatMessage.Images, cancellationToken))
         {
             yield return chunk;
         }
@@ -74,18 +82,24 @@ public class ChatService(
     /// <param name="messageContent">The content of the message to process.</param>
     /// <param name="sessionId">The session ID for the conversation.</param>
     /// <param name="toolResults"></param>
+    /// <param name="images">Optional list of images attached to the message.</param>
     /// <param name="cancellationToken">Cancellation token to stop the streaming operation.</param>
     /// <returns>An async enumerable of response chunks as they are generated.</returns>
     public async IAsyncEnumerable<StreamingResult> SendMessageStreamRecursiveAsync(Agent agent,
         Prompt activePrompt,
         string messageContent,
         string sessionId,
-        List<ToolExecutionLog>? toolResults = null, [EnumeratorCancellation] CancellationToken cancellationToken = default)
+        List<ToolExecutionLog>? toolResults = null,
+        List<ChatImage>? images = null,
+        [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
 
         var recentMessages = await databaseResourceAccess.GetChatHistoryBySessionAsync(sessionId);
 
-        var chatRequest = await llmResourceAccess.PrepareLlmMessageAsync(agent, activePrompt, messageContent, sessionId,recentMessages.ToList());
+        // Debug: Log images count
+        Console.WriteLine($"[ChatService.SendMessageStreamRecursiveAsync] Images count: {images?.Count ?? 0}");
+
+        var chatRequest = await llmResourceAccess.PrepareLlmMessageAsync(agent, activePrompt, messageContent, sessionId, recentMessages.ToList(), images);
 
         var responseContent = new List<string?>();
         var thinkingContent = new List<string?>();
@@ -421,7 +435,8 @@ public class ChatService(
             Role = UserRole,
             AgentId = chatMessage.AgentId!.Value,
             SessionId = sessionId,
-            UserId = chatMessage.UserId
+            UserId = chatMessage.UserId,
+            Images = chatMessage.Images
         });
     }
 

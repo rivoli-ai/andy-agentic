@@ -51,6 +51,10 @@ public class ChatController(IChatService chatService, IMapper mapper, IAuthServi
             var mappedMessage = mapper.Map<ChatMessage>(chatMessage);
             mappedMessage.UserId = currentUser.Id;
 
+            // Debug: Log images count
+            Console.WriteLine($"[ChatController] Received images count: {chatMessage.Images?.Count ?? 0}");
+            Console.WriteLine($"[ChatController] Mapped images count: {mappedMessage.Images?.Count ?? 0}");
+
             await foreach (var chunk in chatService.GetMessageStreamAsync(mappedMessage, cancellationToken))
             {
                 var jsonResponse = JsonSerializer.Serialize(chunk,

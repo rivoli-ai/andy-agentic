@@ -38,5 +38,10 @@ public class ChatMessageDto
     /// </summary>
     public string? Thinking { get; set; }
 
+    /// <summary>
+    ///     List of images attached to the message for multimodal support.
+    ///     Images should be base64 encoded with data URI format: "data:image/jpeg;base64,..."
+    /// </summary>
+    public List<ChatImageDto>? Images { get; set; }
 }
 

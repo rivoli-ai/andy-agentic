@@ -32,7 +32,10 @@ public class DtosMapperProfile : Profile
 
         CreateMap<PromptVariable, PromptVariableDto>().ReverseMap();
 
-        CreateMap<ChatMessage, ChatMessageDto>().ReverseMap();
+        CreateMap<ChatMessage, ChatMessageDto>()
+            .ForMember(dest => dest.Images, opt => opt.MapFrom(src => src.Images))
+            .ReverseMap()
+            .ForMember(dest => dest.Images, opt => opt.MapFrom(src => src.Images));
 
         CreateMap<AgentTool, AgentToolDto>().ReverseMap();
 
@@ -61,5 +64,7 @@ public class DtosMapperProfile : Profile
         CreateMap<ChatMessage, ChatSessionSummaryDto>().ReverseMap();
 
         CreateMap<TestConnection, TestConnectionDto>().ReverseMap();
+
+        CreateMap<ChatImage, ChatImageDto>().ReverseMap();
     }
 }

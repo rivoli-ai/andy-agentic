@@ -22,4 +22,9 @@ public class ChatMessage
     public List<ToolExecutionLog> ToolResults { get; set; } = new();
 
     public string? Thinking { get; set; }
+
+    /// <summary>
+    /// List of image data (base64 encoded) attached to the message for multimodal support.
+    /// </summary>
+    public List<ChatImage>? Images { get; set; }
 }

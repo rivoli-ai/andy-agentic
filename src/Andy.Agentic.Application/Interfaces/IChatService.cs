@@ -51,5 +51,5 @@ public interface IChatService
 
     IAsyncEnumerable<StreamingResult> SendMessageStreamRecursiveAsync(Agent agent, Prompt activePrompt,
         string messageContent, string sessionId,
-        List<ToolExecutionLog>? toolResults = null, CancellationToken cancellationToken = default);
+        List<ToolExecutionLog>? toolResults = null, List<ChatImage>? images = null, CancellationToken cancellationToken = default);
 }

@@ -27,5 +27,10 @@ public class ChatHistoryDto
     ///     Model's thinking process or reasoning before generating the response.
     /// </summary>
     public string? Thinking { get; set; }
+
+    /// <summary>
+    ///     List of images attached to the message for multimodal support.
+    /// </summary>
+    public List<ChatImageDto>? Images { get; set; }
 }
 

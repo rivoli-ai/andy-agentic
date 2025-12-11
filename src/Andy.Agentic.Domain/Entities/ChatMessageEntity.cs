@@ -93,4 +93,10 @@ public class ChatMessageEntity
     /// </summary>
 
     public List<ToolExecutionLogEntity> ToolResults { get; set; } = new();
+
+    /// <summary>
+    ///     List of images attached to the message for multimodal support.
+    ///     Stored as JSON string containing array of ChatImage objects.
+    /// </summary>
+    public string? Images { get; set; }
 }

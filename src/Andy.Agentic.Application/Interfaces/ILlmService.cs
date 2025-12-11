@@ -15,7 +15,7 @@ public interface ILlmService
     Task<TestConnectionResult> TestConnectionAsync(TestConnection testConnectionDto);
 
     Task<LlmRequest> PrepareLlmMessageAsync(Agent agent, Prompt prompt,
-        string userMessage, string sessionId, List<ChatHistory> getChatHistoryFunc);
+        string userMessage, string sessionId, List<ChatHistory> getChatHistoryFunc, List<ChatImage>? images = null);
 
     IAsyncEnumerable<StreamingResult> SendToLlmProviderStreamAsync(
         Agent agent,

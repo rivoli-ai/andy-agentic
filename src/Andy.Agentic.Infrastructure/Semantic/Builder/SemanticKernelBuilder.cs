@@ -123,7 +123,6 @@ public class SemanticKernelBuilder : ISemanticKernelBuilder
     /// <param name="config">The configuration for the LLM.</param>
     /// <param name="request">The request containing details for the kernel build.</param>
     /// <param name="toolExecutionRecorder">The recorder for tool execution.</param>
-    /// <param name="user"></param>
     /// <returns>
     /// Returns a KernelResponse containing the built kernel and chat history.
     /// </returns>
@@ -158,18 +157,71 @@ public class SemanticKernelBuilder : ISemanticKernelBuilder
 
         var chatHistory = new Microsoft.SemanticKernel.ChatCompletion.ChatHistory();
 
+        // Debug: Log images count
+        Console.WriteLine($"[SemanticKernelBuilder] Request.Images count: {request.Images?.Count ?? 0}");
+
+        var lastUserMessage = request.Messages.LastOrDefault(m => m.Role == "user");
 
         foreach (var message in request.Messages)
         {
             if (message.Role == "user")
             {
-                chatHistory.AddUserMessage(message.Content);
+                // Check if this message has images (from history or current request)
+                var messageImages = message.Images ?? (message == lastUserMessage ? request.Images : null);
+                var hasMessageImages = messageImages != null && messageImages.Any();
+
+                if (hasMessageImages)
+                {
+                    // For Semantic Kernel, create ChatMessageContentItemCollection for multimodal support
+                    var contentItems = new Microsoft.SemanticKernel.ChatCompletion.ChatMessageContentItemCollection();
+                    
+                    // Add text content if present
+                    if (!string.IsNullOrEmpty(message.Content))
+                    {
+                        contentItems.Add(new Microsoft.SemanticKernel.TextContent(message.Content));
+                    }
+
+                    // Add image content
+                    foreach (var image in messageImages!)
+                    {
+                        // Extract base64 data (remove data URI prefix if present)
+                        var base64Data = image.Data;
+                        if (base64Data.StartsWith("data:", StringComparison.OrdinalIgnoreCase))
+                        {
+                            var commaIndex = base64Data.IndexOf(',');
+                            if (commaIndex > 0)
+                            {
+                                base64Data = base64Data.Substring(commaIndex + 1);
+                            }
+                        }
+
+                        try
+                        {
+                            var imageBytes = Convert.FromBase64String(base64Data);
+                            // Create ImageContent with bytes and mime type
+                            var imageContent = new Microsoft.SemanticKernel.ImageContent(imageBytes, image.MimeType);
+                            contentItems.Add(imageContent);
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger?.LogWarning(ex, "Failed to decode image data, skipping image: {Error}", ex.Message);
+                        }
+                    }
+
+                    // Add user message with content items collection
+                    chatHistory.AddUserMessage(contentItems);
+                }
+                else
+                {
+                    chatHistory.AddUserMessage(message.Content);
+                }
             }
             else
             {
                 chatHistory.AddAssistantMessage(message.Content);
             }
         }
+
 
         return new KernelResponse(kernel, chatHistory, agent);
     }

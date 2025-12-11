@@ -195,7 +195,8 @@ public class LlmService(ILlmRepository llmRepository, ILlmProviderFactory provid
         Prompt prompt,
         string userMessage,
         string sessionId,
-        List<ChatHistory> recentMessages)
+        List<ChatHistory> recentMessages,
+        List<ChatImage>? images = null)
     {
         var allTools = BuilolsFromAgent(agent);
         
@@ -205,8 +206,42 @@ public class LlmService(ILlmRepository llmRepository, ILlmProviderFactory provid
         Console.WriteLine($"Chat History Count: {recentMessages.Count}");
         Console.WriteLine($"Total Tools Available: {allTools.Count}");
         Console.WriteLine($"Tools After Filtering: {tools.Count}");
+        Console.WriteLine($"Images Count: {images?.Count ?? 0}");
 
-        return  new LlmRequest {Messages = recentMessages, Tools = tools! };
+        // Create a user message with images if provided
+        var messages = new List<ChatHistory>(recentMessages);
+        
+        // If we have images for the current message, add it to the messages list
+        // The images will be handled in Semantic Kernel builder
+        if (images != null && images.Any())
+        {
+            var userContent = new ChatHistory
+            {
+                Content = userMessage,
+                Role = "user",
+                AgentId = agent.Id,
+                SessionId = sessionId,
+                Timestamp = DateTime.UtcNow,
+                Images = images // Include images in the message
+            };
+            messages.Add(userContent);
+        }
+        else if (!string.IsNullOrEmpty(userMessage))
+        {
+            // Add user message even without images to maintain conversation flow
+            var userContent = new ChatHistory
+            {
+                Content = userMessage,
+                Role = "user",
+                AgentId = agent.Id,
+                SessionId = sessionId,
+                Timestamp = DateTime.UtcNow
+            };
+            messages.Add(userContent);
+        }
+
+        // Note: Images from history are already in the messages, and current images are in the request
+        return new LlmRequest { Messages = messages, Tools = tools!, Images = images };
     }
 
     /// <summary>
@@ -233,7 +268,7 @@ public class LlmService(ILlmRepository llmRepository, ILlmProviderFactory provid
             
             // Simple heuristic to detect thinking patterns
             // Look for common thinking indicators
-            if (content.Contains("<think>"))
+            if (content.Contains("<think>") || content.Contains("<|begin_of_box|>"))
             {
                 isThinking = true;
                 continue;
@@ -241,7 +276,7 @@ public class LlmService(ILlmRepository llmRepository, ILlmProviderFactory provid
             
             if (isThinking)
             {
-                if (content.Contains("</think>"))
+                if (content.Contains("</think>") || content.Contains("<|end_of_box|>")) 
                 {
                     isThinking = false;
                     continue;
