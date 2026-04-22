@@ -8,7 +8,7 @@ using Microsoft.Extensions.Logging;
 using System.Security.Claims;
 using Moq;
 using FluentAssertions;
-using AutoMapper;
+using MapsterMapper;
 using System.Collections.Generic;
 
 namespace Andy.Agentic.Tests.Controllers;

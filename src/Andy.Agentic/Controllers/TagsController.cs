@@ -1,7 +1,7 @@
 using Andy.Agentic.Application.DTOs;
 using Andy.Agentic.Application.Interfaces;
 using Andy.Agentic.Domain.Models;
-using AutoMapper;
+using MapsterMapper;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -22,7 +22,7 @@ public class TagsController : ControllerBase
     ///     Initializes a new instance of the TagsController.
     /// </summary>
     /// <param name="tagService">The tag service for business logic operations.</param>
-    /// <param name="mapper">The AutoMapper instance for object mapping.</param>
+    /// <param name="mapper">The Mapster mapper for object mapping.</param>
     public TagsController(ITagService tagService,
         IMapper mapper)
     {

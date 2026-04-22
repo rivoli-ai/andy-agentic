@@ -7,7 +7,7 @@ using Andy.Agentic.Domain.Interfaces.Database;
 using Andy.Agentic.Domain.Interfaces.Llm;
 using Andy.Agentic.Domain.Interfaces.Llm.Semantic;
 using Andy.Agentic.Domain.Models;
-using AutoMapper;
+using MapsterMapper;
 using System.Runtime.CompilerServices;
 
 namespace Andy.Agentic.Application.Services;
@@ -49,6 +49,7 @@ public class LlmService(ILlmRepository llmRepository, ILlmProviderFactory provid
     public async Task<LlmConfig> CreateLlmConfigAsync(LlmConfig createLlmConfig)
     {
         var config = mapper.Map<LlmConfigEntity>(createLlmConfig);
+        config.CreatedByUser = null;
         config.Id = Guid.NewGuid();
         config.CreatedAt = DateTime.UtcNow;
         config.UpdatedAt = DateTime.UtcNow;
@@ -74,6 +75,7 @@ public class LlmService(ILlmRepository llmRepository, ILlmProviderFactory provid
         }
 
         mapper.Map(updateLlmConfig, config);
+        config.CreatedByUser = null;
         config.UpdatedAt = DateTime.UtcNow;
 
         await llmRepository.UpdateAsync(config);

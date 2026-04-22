@@ -1,5 +1,5 @@
-using Andy.Agentic.Application.Interfaces;
 using Andy.Agentic.Application.DTOs;
+using Andy.Agentic.Application.Interfaces;
 using Andy.Agentic.Controllers;
 using Andy.Agentic.Domain.Models;
 using Andy.Agentic.Domain.Queries.SearchCriteria;
@@ -9,7 +9,7 @@ using Microsoft.Extensions.Logging;
 using System.Security.Claims;
 using Moq;
 using FluentAssertions;
-using AutoMapper;
+using MapsterMapper;
 
 namespace Andy.Agentic.Tests.Controllers;
 
@@ -18,6 +18,8 @@ public class ToolsControllerTests
     private readonly Mock<IToolService> _mockToolService;
     private readonly Mock<IMapper> _mockMapper;
     private readonly Mock<IMcpService> _mockMcpService;
+    private readonly Mock<IAuthService> _mockAuthService;
+    private readonly Guid _currentUserId = Guid.NewGuid();
     private readonly ToolsController _controller;
 
     public ToolsControllerTests()
@@ -25,7 +27,11 @@ public class ToolsControllerTests
         _mockToolService = new Mock<IToolService>();
         _mockMapper = new Mock<IMapper>();
         _mockMcpService = new Mock<IMcpService>();
-        _controller = new ToolsController(_mockToolService.Object, _mockMapper.Object, _mockMcpService.Object);
+        _mockAuthService = new Mock<IAuthService>();
+        _mockAuthService
+            .Setup(x => x.GetCurrentUserAsync())
+            .ReturnsAsync(new UserDto { Id = _currentUserId, Email = "test@example.com", DisplayName = "Test" });
+        _controller = new ToolsController(_mockToolService.Object, _mockMapper.Object, _mockMcpService.Object, _mockAuthService.Object);
         
         // Setup controller context with user claims
         var claims = new List<Claim>
@@ -155,6 +161,7 @@ public class ToolsControllerTests
         var result = await _controller.CreateTool(createToolDto);
 
         // Assert
+        mockedTool.CreatedByUserId.Should().Be(_currentUserId);
         result.Should().BeOfType<ActionResult<ToolDto>>()
             .Which.Result.Should().BeOfType<CreatedAtActionResult>()
             .Which.Value.Should().BeEquivalentTo(mockedTool);
@@ -165,15 +172,21 @@ public class ToolsControllerTests
     public async Task UpdateTool_WithValidTool_ShouldReturnUpdatedTool()
     {
         // Arrange
+        var toolId = Guid.NewGuid();
         var updateToolDto = new ToolDto
         {
-            Id = Guid.NewGuid(),
+            Id = toolId,
             Name = "Updated Tool",
             Type = "mcp",
             Description = "Updated Description",
             Configuration = "{\"url\": \"https://updated-api.example.com\"}",
             IsActive = true
         };
+
+        var existingOwnerId = Guid.NewGuid();
+        _mockToolService
+            .Setup(x => x.GetToolByIdAsync(toolId))
+            .ReturnsAsync(new Tool { Id = toolId, CreatedByUserId = existingOwnerId, Name = "Old" });
 
         var mockedTool = new Tool
         {
@@ -191,12 +204,14 @@ public class ToolsControllerTests
 
         _mockToolService
             .Setup(x => x.UpdateToolAsync(It.IsAny<Guid>(), It.IsAny<Tool>()))
-            .ReturnsAsync(mockedTool);
+            .ReturnsAsync((Guid _, Tool t) => t);
 
         // Act
         var result = await _controller.UpdateTool(updateToolDto.Id!.Value, updateToolDto);
 
         // Assert
+        mockedTool.Id.Should().Be(toolId);
+        mockedTool.CreatedByUserId.Should().Be(existingOwnerId);
         result.Should().BeOfType<ActionResult<ToolDto>>()
             .Which.Result.Should().BeOfType<OkObjectResult>()
             .Which.Value.Should().BeEquivalentTo(mockedTool);
@@ -216,6 +231,11 @@ public class ToolsControllerTests
             Description = "Updated Description"
         };
 
+        var existingOwnerId = Guid.NewGuid();
+        _mockToolService
+            .Setup(x => x.GetToolByIdAsync(toolId))
+            .ReturnsAsync(new Tool { Id = toolId, CreatedByUserId = existingOwnerId });
+
         var mockedTool = new Tool
         {
             Id = toolId,
@@ -224,14 +244,19 @@ public class ToolsControllerTests
             Description = "Updated Description"
         };
 
+        _mockMapper
+            .Setup(x => x.Map<Tool>(updateToolDto))
+            .Returns(mockedTool);
+
         _mockToolService
             .Setup(x => x.UpdateToolAsync(toolId, It.IsAny<Tool>()))
-            .ReturnsAsync(mockedTool);
+            .ReturnsAsync((Guid _, Tool t) => t);
 
         // Act
         var result = await _controller.UpdateTool(toolId, updateToolDto);
 
         // Assert
+        mockedTool.CreatedByUserId.Should().Be(existingOwnerId);
         result.Should().BeOfType<ActionResult<ToolDto>>()
             .Which.Result.Should().BeOfType<OkObjectResult>()
             .Which.Value.Should().BeEquivalentTo(mockedTool);

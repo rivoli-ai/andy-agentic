@@ -1,7 +1,6 @@
 using Andy.Agentic.Application.Interfaces;
 using Andy.Agentic.Domain.Interfaces.Database;
 using Andy.Agentic.Domain.Models;
-using AutoMapper;
 
 namespace Andy.Agentic.Application.Services;
 
@@ -9,7 +8,7 @@ namespace Andy.Agentic.Application.Services;
 ///     Service for managing tool operations including CRUD operations, search, and filtering.
 ///     Acts as a facade over the database service for tool-related functionality.
 /// </summary>
-public class ToolService(IDataBaseService databaseResourceAccess, IMapper mapper) : IToolService
+public class ToolService(IDataBaseService databaseResourceAccess) : IToolService
 {
     /// <summary>
     ///     Retrieves all tools from the database.

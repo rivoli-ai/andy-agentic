@@ -4,7 +4,7 @@ using Andy.Agentic.Domain.Interfaces;
 using Andy.Agentic.Domain.Interfaces.Database;
 using Andy.Agentic.Domain.Models;
 using Andy.Agentic.Domain.Queries.SearchCriteria;
-using AutoMapper;
+using MapsterMapper;
 
 namespace Andy.Agentic.Infrastructure.Services;
 
@@ -34,7 +34,13 @@ public class DatabaseService(
 
     public async Task<Agent> CreateAgentAsync(Agent createAgent)
     {
+        if (createAgent.LlmConfigId == Guid.Empty)
+            throw new ArgumentException("LlmConfigId is required.", nameof(createAgent));
+
         var agent = mapper.Map<AgentEntity>(createAgent);
+        agent.LlmConfig = null;
+        agent.EmbeddingLlmConfig = null;
+        StripAgentChildNavigations(agent);
         agent.CreatedAt = DateTime.UtcNow;
         agent.UpdatedAt = DateTime.UtcNow;
 
@@ -44,11 +50,50 @@ public class DatabaseService(
 
     public async Task<Agent> UpdateAgentAsync(Agent updateAgent)
     {
+        if (updateAgent.LlmConfigId == Guid.Empty)
+        {
+            var existingRow = await agentRepository.GetByIdAsync(updateAgent.Id);
+            if (existingRow != null && existingRow.LlmConfigId != Guid.Empty)
+                updateAgent.LlmConfigId = existingRow.LlmConfigId;
+        }
+
+        if (updateAgent.LlmConfigId == Guid.Empty)
+            throw new ArgumentException("A valid LlmConfigId is required (or the agent has none stored to preserve).", nameof(updateAgent));
+
         var agent = mapper.Map<AgentEntity>(updateAgent);
+        agent.LlmConfig = null;
+        agent.EmbeddingLlmConfig = null;
+        StripAgentChildNavigations(agent);
 
         await agentRepository.UpdateAsync(agent);
 
         return mapper.Map<Agent>(agent);
+    }
+
+    /// <summary>
+    /// Child rows often carry a detached <see cref="AgentEntity"/> on navigation properties. During
+    /// <c>UpdateWithIncludesAsync</c>, <c>Add</c> on new join rows can otherwise cascade an insert of that
+    /// stub agent with <c>LlmConfigId = default</c> and fail the FK.
+    /// </summary>
+    private static void StripAgentChildNavigations(AgentEntity agent)
+    {
+        foreach (var p in agent.Prompts)
+            p.Agent = null;
+
+        foreach (var at in agent.Tools)
+        {
+            at.Agent = null;
+            at.Tool = null;
+        }
+
+        foreach (var m in agent.McpServers)
+            m.Agent = null;
+
+        foreach (var atag in agent.AgentTags)
+            atag.Agent = null;
+
+        foreach (var ad in agent.AgentDocuments)
+            ad.Agent = null;
     }
 
     public async Task<bool> DeleteAgentAsync(Guid id) => await agentRepository.DeleteAsync(id);
@@ -156,6 +201,7 @@ public class DatabaseService(
     public async Task<LlmConfig> CreateLlmConfigAsync(LlmConfig createLlmConfig)
     {
         var config = mapper.Map<LlmConfigEntity>(createLlmConfig);
+        config.CreatedByUser = null;
         var createdConfig = await llmRepository.CreateAsync(config);
         return mapper.Map<LlmConfig>(createdConfig);
     }
@@ -169,6 +215,7 @@ public class DatabaseService(
         }
 
         mapper.Map(updateLlmConfig, existingConfig);
+        existingConfig.CreatedByUser = null;
         var updatedConfig = await llmRepository.UpdateAsync(existingConfig);
         return mapper.Map<LlmConfig>(updatedConfig);
     }

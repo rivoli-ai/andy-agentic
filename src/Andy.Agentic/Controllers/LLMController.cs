@@ -1,7 +1,7 @@
 using Andy.Agentic.Application.DTOs;
 using Andy.Agentic.Application.Interfaces;
 using Andy.Agentic.Domain.Models;
-using AutoMapper;
+using MapsterMapper;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Authorization;
 
@@ -93,7 +93,7 @@ public class LlmController(ILlmService llmService, IMapper mapper) : ControllerB
     /// <returns>The updated LLM configuration details.</returns>
     [HttpPut("configs/{id}")]
      [Authorize(Policy = "WriteRole")]
-    public async Task<ActionResult<LlmConfigDto>> UpdateLlmConfig([FromBody] LlmConfigDto updateLlmConfigDto)
+    public async Task<ActionResult<LlmConfigDto>> UpdateLlmConfig(Guid id, [FromBody] LlmConfigDto updateLlmConfigDto)
     {
         try
         {
@@ -101,6 +101,11 @@ public class LlmController(ILlmService llmService, IMapper mapper) : ControllerB
             {
                 return BadRequest(ModelState);
             }
+
+            if (updateLlmConfigDto.Id is null || updateLlmConfigDto.Id == Guid.Empty)
+                updateLlmConfigDto.Id = id;
+            else if (updateLlmConfigDto.Id != id)
+                return BadRequest(new { error = "Route id and body id must match." });
 
             var config = await llmService.UpdateLlmConfigAsync(mapper.Map<LlmConfig>(updateLlmConfigDto));
             return Ok(config);

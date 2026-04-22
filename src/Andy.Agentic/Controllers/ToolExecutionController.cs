@@ -1,7 +1,7 @@
 using Andy.Agentic.Application.DTOs;
 using Andy.Agentic.Application.Interfaces;
 using Andy.Agentic.Domain.Models;
-using AutoMapper;
+using MapsterMapper;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 

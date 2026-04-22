@@ -12,13 +12,14 @@ public interface IMcpService
     /// </summary>
     /// <param name="serverUrl">The URL of the MCP server.</param>
     /// <returns>A response containing the discovered tools or error information.</returns>
-    Task<McpToolDiscoveryResponse> DiscoverToolsAsync(string serverUrl);
+    Task<McpToolDiscoveryResponse> DiscoverToolsAsync(string serverUrl, string? transport = null);
 
     /// <summary>
     /// Converts an MCP tool discovery to a Tool entity.
     /// </summary>
     /// <param name="mcpTool">The discovered MCP tool.</param>
     /// <param name="serverUrl">The URL of the MCP server.</param>
+    /// <param name="transport">UI transport label (e.g. SSE, HTTP Streaming); stored on the tool for execution.</param>
     /// <returns>A Tool entity representing the MCP tool.</returns>
-    Tool ConvertToTool(McpToolDiscovery mcpTool, string serverUrl);
+    Tool ConvertToTool(McpToolDiscovery mcpTool, string serverUrl, string? transport = null);
 }

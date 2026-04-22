@@ -1,6 +1,7 @@
 using System.Text.Json;
 using Andy.Agentic.Application.Interfaces;
 using Andy.Agentic.Domain.Models;
+using Microsoft.Extensions.Logging.Abstractions;
 using ModelContextProtocol.Client;
 
 namespace Andy.Agentic.Infrastructure.Services.ToolProviders;
@@ -22,13 +23,15 @@ public class McpService : IMcpService
     /// </summary>
     /// <param name="serverUrl">The URL of the MCP server.</param>
     /// <returns>A response containing the discovered tools or error information.</returns>
-    public async Task<McpToolDiscoveryResponse> DiscoverToolsAsync(string serverUrl)
+    public async Task<McpToolDiscoveryResponse> DiscoverToolsAsync(string serverUrl, string? transport = null)
     {
         try
         {
-          
-            var transport = CreateSseTransport(serverUrl);
-            var client = await McpClientFactory.CreateAsync(transport).ConfigureAwait(false);
+            var mode = McpHttpTransportHelper.GetModeForDiscovery(transport);
+            var clientTransport = CreateHttpTransport(serverUrl, mode);
+            await using var client = await McpClient
+                .CreateAsync(clientTransport, new McpClientOptions(), NullLoggerFactory.Instance, default)
+                .ConfigureAwait(false);
 
             var toolsResult = await client.ListToolsAsync().ConfigureAwait(false);
 
@@ -78,9 +81,10 @@ public class McpService : IMcpService
     /// <param name="mcpTool">The discovered MCP tool.</param>
     /// <param name="serverUrl">The URL of the MCP server.</param>
     /// <returns>A Tool entity representing the MCP tool.</returns>
-    public Tool ConvertToTool(McpToolDiscovery mcpTool, string serverUrl)
+    public Tool ConvertToTool(McpToolDiscovery mcpTool, string serverUrl, string? transport = null)
     {
         var parameters = new List<object>();
+        var storedTransport = McpHttpTransportHelper.ToStorageTransport(transport);
         
         if (mcpTool.InputSchema?.Properties != null)
         {
@@ -109,8 +113,9 @@ public class McpService : IMcpService
             IsActive = true,
             Configuration = JsonSerializer.Serialize(new { 
                 serverUrl,
-                mcpType = "sse",
-                endpoint = serverUrl
+                mcpType = storedTransport,
+                endpoint = serverUrl,
+                name = mcpTool.Name
             }),
             Parameters = JsonSerializer.Serialize(parameters),
             CreatedAt = DateTime.UtcNow,
@@ -119,21 +124,17 @@ public class McpService : IMcpService
         };
     }
 
-    /// <summary>
-    /// Creates an SSE transport for MCP connection.
-    /// </summary>
-    /// <param name="endpoint">The MCP server endpoint URL.</param>
-    /// <returns>An SSE client transport configured for the MCP server.</returns>
-    private static IClientTransport CreateSseTransport(string endpoint)
+    private static IClientTransport CreateHttpTransport(string endpoint, HttpTransportMode mode)
     {
-        var options = new SseClientTransportOptions
+        var options = new HttpClientTransportOptions
         {
             Endpoint = new Uri(endpoint),
             ConnectionTimeout = TimeSpan.FromSeconds(120),
-            Name = "MCP Discovery Client"
+            Name = "MCP Discovery Client",
+            TransportMode = mode
         };
 
-        return new SseClientTransport(options);
+        return new HttpClientTransport(options, NullLoggerFactory.Instance);
     }
 
     /// <summary>

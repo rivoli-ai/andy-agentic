@@ -2,21 +2,18 @@ using Andy.Agentic.Application.Interfaces;
 using Andy.Agentic.Application.Services;
 using Andy.Agentic.Domain.Interfaces.Database;
 using Andy.Agentic.Domain.Models;
-using AutoMapper;
 
 namespace Andy.Agentic.Application.Tests.Services;
 
 public class SimpleAgentServiceTests
 {
     private readonly Mock<IDataBaseService> _mockDatabaseService;
-    private readonly Mock<IMapper> _mockMapper;
     private readonly AgentService _agentService;
 
     public SimpleAgentServiceTests()
     {
         _mockDatabaseService = new Mock<IDataBaseService>();
-        _mockMapper = new Mock<IMapper>();
-        _agentService = new AgentService(_mockDatabaseService.Object, _mockMapper.Object);
+        _agentService = new AgentService(_mockDatabaseService.Object);
     }
 
     [Fact]
@@ -99,7 +96,7 @@ public class SimpleAgentServiceTests
             LlmConfigId = Guid.NewGuid()
         };
 
-        var mappedAgent = new Agent
+        var expectedAgent = new Agent
         {
             Id = Guid.NewGuid(),
             Name = createAgent.Name,
@@ -109,22 +106,8 @@ public class SimpleAgentServiceTests
             LlmConfigId = createAgent.LlmConfigId
         };
 
-        var expectedAgent = new Agent
-        {
-            Id = mappedAgent.Id,
-            Name = mappedAgent.Name,
-            Description = mappedAgent.Description,
-            Type = mappedAgent.Type,
-            IsActive = mappedAgent.IsActive,
-            LlmConfigId = mappedAgent.LlmConfigId
-        };
-
-        _mockMapper
-            .Setup(x => x.Map<Agent>(createAgent))
-            .Returns(mappedAgent);
-
         _mockDatabaseService
-            .Setup(x => x.CreateAgentAsync(mappedAgent))
+            .Setup(x => x.CreateAgentAsync(createAgent))
             .ReturnsAsync(expectedAgent);
 
         // Act
@@ -132,8 +115,7 @@ public class SimpleAgentServiceTests
 
         // Assert
         result.Should().BeEquivalentTo(expectedAgent);
-        _mockMapper.Verify(x => x.Map<Agent>(createAgent), Times.Once);
-        _mockDatabaseService.Verify(x => x.CreateAgentAsync(mappedAgent), Times.Once);
+        _mockDatabaseService.Verify(x => x.CreateAgentAsync(createAgent), Times.Once);
     }
 
     [Fact]

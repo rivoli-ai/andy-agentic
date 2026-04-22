@@ -2,7 +2,7 @@ using Andy.Agentic.Application.Interfaces;
 using Andy.Agentic.Domain.Entities;
 using Andy.Agentic.Domain.Interfaces.Database;
 using Andy.Agentic.Domain.Models;
-using AutoMapper;
+using MapsterMapper;
 
 namespace Andy.Agentic.Application.Services;
 
@@ -18,7 +18,7 @@ public class TagService : ITagService
     /// Initializes a new instance of the TagService.
     /// </summary>
     /// <param name="tagRepository">The tag repository for data access.</param>
-    /// <param name="mapper">The AutoMapper instance for object mapping.</param>
+    /// <param name="mapper">The Mapster mapper for object mapping.</param>
     public TagService(ITagRepository tagRepository, IMapper mapper)
     {
         _tagRepository = tagRepository;

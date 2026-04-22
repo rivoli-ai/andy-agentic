@@ -3,7 +3,7 @@ using System.Text.Encodings.Web;
 using System.Text.Json;
 using Andy.Agentic.Application.DTOs;
 using Andy.Agentic.Application.Interfaces;
-using AutoMapper;
+using MapsterMapper;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Authorization;
 

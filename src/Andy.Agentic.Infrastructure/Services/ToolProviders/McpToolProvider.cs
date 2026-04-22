@@ -1,12 +1,11 @@
 using Andy.Agentic.Domain.Interfaces;
 using Andy.Agentic.Domain.Models;
-using Microsoft.AspNetCore.Authentication.OAuth;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using ModelContextProtocol;
 using ModelContextProtocol.Client;
 using ModelContextProtocol.Protocol;
 using System.Text.Json;
-using IMcpClient = ModelContextProtocol.Client.IMcpClient;
 
 namespace Andy.Agentic.Infrastructure.Services.ToolProviders;
 
@@ -21,14 +20,14 @@ public class McpToolProvider(ILogger<McpToolProvider> logger) : IToolProvider
         if (tool == null)
             throw new ArgumentNullException(nameof(tool));
 
-        IMcpClient? client = null;
+        McpClient? client = null;
         try
         {
             var configuration = ParseConfiguration(tool.Configuration);
             var auth = ParseAuthentication(tool.Authentication);
 
             var endpoint = GetRequiredConfigValue<string>(configuration, "endpoint");
-            var mcpType = GetConfigValue(configuration, "mcpType", "stdio");
+            var mcpType = GetConfigValue(configuration, "mcpType", "auto");
             var toolName = GetRequiredConfigValue<string>(configuration, "name");
 
 
@@ -52,20 +51,17 @@ public class McpToolProvider(ILogger<McpToolProvider> logger) : IToolProvider
     public bool CanHandleToolType(string toolType) =>
         string.Equals(toolType, ToolType, StringComparison.OrdinalIgnoreCase);
 
-    private async Task<IMcpClient> CreateMcpClientAsync(
+    private async Task<McpClient> CreateMcpClientAsync(
         string endpoint,
         string mcpType,
         Dictionary<string, object> configuration,
         Dictionary<string, object> auth)
     {
-        IClientTransport transport = mcpType.ToLowerInvariant() switch
-        {
-            "stdio" => CreateStdioTransport(endpoint, configuration, auth),
-            "sse" => CreateSseTransport(endpoint, configuration, auth),
-            _ => throw new ArgumentException($"Unsupported MCP transport type: {mcpType}")
-        };
+        IClientTransport transport = McpHttpTransportHelper.IsStdio(mcpType)
+            ? CreateStdioTransport(endpoint, configuration, auth)
+            : CreateHttpTransport(endpoint, configuration, auth, McpHttpTransportHelper.GetModeForExecution(mcpType));
 
-        return await McpClientFactory.CreateAsync(transport);
+        return await McpClient.CreateAsync(transport, new McpClientOptions(), NullLoggerFactory.Instance, default);
     }
 
     private IClientTransport CreateStdioTransport(
@@ -95,26 +91,28 @@ public class McpToolProvider(ILogger<McpToolProvider> logger) : IToolProvider
             EnvironmentVariables = environmentVariables
         };
 
-        return new StdioClientTransport(options);
+        return new StdioClientTransport(options, NullLoggerFactory.Instance);
     }
 
-    private IClientTransport CreateSseTransport(
+    private IClientTransport CreateHttpTransport(
         string endpoint,
         Dictionary<string, object> configuration,
-        Dictionary<string, object> headers)
+        Dictionary<string, object> headers,
+        HttpTransportMode transportMode)
     {
-        var options = new SseClientTransportOptions
+        var options = new HttpClientTransportOptions
         {
             Endpoint = new Uri(endpoint),
-            Name = GetConfigValue(configuration, "name", "SSE Client"),
-            AdditionalHeaders = headers.ToDictionary(kvp => kvp.Key, kvp => kvp.Value?.ToString() ?? string.Empty)
+            Name = GetConfigValue(configuration, "name", "MCP HTTP Client"),
+            AdditionalHeaders = headers.ToDictionary(kvp => kvp.Key, kvp => kvp.Value?.ToString() ?? string.Empty),
+            TransportMode = transportMode
         };
 
         var timeout = GetConfigValue<TimeSpan?>(configuration, "timeout", null);
-         if (timeout.HasValue)
+        if (timeout.HasValue)
             options.ConnectionTimeout = timeout.Value;
 
-        return new SseClientTransport(options);
+        return new HttpClientTransport(options, NullLoggerFactory.Instance);
     }
 
 

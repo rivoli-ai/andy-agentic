@@ -1,7 +1,7 @@
 using Andy.Agentic.Application.DTOs;
 using Andy.Agentic.Application.Interfaces;
 using Andy.Agentic.Domain.Models;
-using AutoMapper;
+using MapsterMapper;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Authorization;
 
@@ -13,7 +13,7 @@ namespace Andy.Agentic.Controllers;
 [ApiController]
 [Route("api/[controller]")]
 [Authorize]
-public class ToolsController(IToolService toolService, IMapper mapper, IMcpService mcpService) : ControllerBase
+public class ToolsController(IToolService toolService, IMapper mapper, IMcpService mcpService, IAuthService authService) : ControllerBase
 {
     /// <summary>
     ///     Retrieves all available tools.
@@ -73,8 +73,16 @@ public class ToolsController(IToolService toolService, IMapper mapper, IMcpServi
                 return BadRequest(ModelState);
             }
 
-            var tool = await toolService.CreateToolAsync(mapper.Map<Tool>(createToolDto));
-            return CreatedAtAction(nameof(GetTool), new { id = tool.Id }, tool);
+            var currentUser = await authService.GetCurrentUserAsync();
+            if (currentUser == null)
+            {
+                return Unauthorized(new { error = "User not authenticated" });
+            }
+
+            var tool = mapper.Map<Tool>(createToolDto);
+            tool.CreatedByUserId = currentUser.Id;
+            var created = await toolService.CreateToolAsync(tool);
+            return CreatedAtAction(nameof(GetTool), new { id = created.Id }, created);
         }
         catch (ArgumentException ex)
         {
@@ -103,8 +111,17 @@ public class ToolsController(IToolService toolService, IMapper mapper, IMcpServi
                 return BadRequest(ModelState);
             }
 
-            var tool = await toolService.UpdateToolAsync(id, mapper.Map<Tool>(updateToolDto));
-            return Ok(tool);
+            var existing = await toolService.GetToolByIdAsync(id);
+            if (existing == null)
+            {
+                return NotFound(new { error = "Tool not found" });
+            }
+
+            var tool = mapper.Map<Tool>(updateToolDto);
+            tool.Id = id;
+            tool.CreatedByUserId = existing.CreatedByUserId;
+            var updated = await toolService.UpdateToolAsync(id, tool);
+            return Ok(updated);
         }
         catch (ArgumentException ex)
         {
@@ -231,7 +248,9 @@ public class ToolsController(IToolService toolService, IMapper mapper, IMcpServi
     /// <param name="url">The URL of the MCP server.</param>
     /// <returns>A list of discovered tools from the MCP server.</returns>
     [HttpGet("discover-mcp")]
-    public async Task<ActionResult<McpToolDiscoveryResponse>> DiscoverMcpTools([FromQuery] string url)
+    public async Task<ActionResult<McpToolDiscoveryResponse>> DiscoverMcpTools(
+        [FromQuery] string url,
+        [FromQuery] string? transport = null)
     {
         try
         {
@@ -240,7 +259,7 @@ public class ToolsController(IToolService toolService, IMapper mapper, IMcpServi
                 return BadRequest(new { error = "URL is required" });
             }
 
-            var response = await mcpService.DiscoverToolsAsync(url);
+            var response = await mcpService.DiscoverToolsAsync(url, transport);
             return Ok(response);
         }
         catch (Exception ex)
@@ -264,14 +283,14 @@ public class ToolsController(IToolService toolService, IMapper mapper, IMcpServi
                 return BadRequest(new { error = "URL is required" });
             }
 
-            var response = await mcpService.DiscoverToolsAsync(request.Url);
+            var response = await mcpService.DiscoverToolsAsync(request.Url, request.Transport);
             
             if (!response.Success)
             {
                 return BadRequest(new { error = "MCP discovery failed", message = response.Error });
             }
 
-            var tools = response.Tools.Select(mcpTool => mcpService.ConvertToTool(mcpTool, request.Url));
+            var tools = response.Tools.Select(mcpTool => mcpService.ConvertToTool(mcpTool, request.Url, request.Transport));
             var toolDtos = tools.Select(tool => mapper.Map<ToolDto>(tool));
 
             return Ok(toolDtos);

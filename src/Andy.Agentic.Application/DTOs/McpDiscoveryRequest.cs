@@ -12,4 +12,9 @@ public class McpDiscoveryRequest
     /// </summary>
     [Required]
     public string Url { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Optional: SSE, HTTP Streaming, streamable-http, auto — drives MCP HTTP transport for discovery and stored tool config.
+    /// </summary>
+    public string? Transport { get; set; }
 }

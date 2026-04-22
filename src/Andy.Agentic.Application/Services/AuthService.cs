@@ -61,6 +61,9 @@ public class AuthService : IAuthService
     /// <returns>The user DTO</returns>
     public async Task<UserDto> CreateOrUpdateUserAsync(string azureAdId, string email, string displayName, string? firstName = null, string? lastName = null)
     {
+        if (string.IsNullOrWhiteSpace(azureAdId))
+            throw new ArgumentException("Azure AD object id is required.", nameof(azureAdId));
+
         var existingUser = await _userRepository.GetByAzureAdIdAsync(azureAdId);
 
         if (existingUser != null)

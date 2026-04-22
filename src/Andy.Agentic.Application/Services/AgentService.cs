@@ -1,7 +1,6 @@
 using Andy.Agentic.Application.Interfaces;
 using Andy.Agentic.Domain.Interfaces.Database;
 using Andy.Agentic.Domain.Models;
-using AutoMapper;
 
 namespace Andy.Agentic.Application.Services;
 
@@ -9,7 +8,7 @@ namespace Andy.Agentic.Application.Services;
 ///     Service for managing agent operations including CRUD operations, search, and filtering.
 ///     Acts as a facade over the database service for agent-related functionality.
 /// </summary>
-public class AgentService(IDataBaseService databaseResourceAccess, IMapper mapper) : IAgentService
+public class AgentService(IDataBaseService databaseResourceAccess) : IAgentService
 {
     /// <summary>
     ///     Retrieves all agents from the database.
@@ -29,7 +28,7 @@ public class AgentService(IDataBaseService databaseResourceAccess, IMapper mappe
     /// </summary>
     /// <param name="createAgent">The agent data for creation.</param>
     /// <returns>The created agent .</returns>
-    public async Task<Agent> CreateAgentAsync(Agent createAgent) => await databaseResourceAccess.CreateAgentAsync(mapper.Map<Agent>(createAgent));
+    public async Task<Agent> CreateAgentAsync(Agent createAgent) => await databaseResourceAccess.CreateAgentAsync(createAgent);
 
     /// <summary>
     ///     Updates an existing agent in the database.

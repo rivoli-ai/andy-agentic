@@ -8,7 +8,7 @@ using Microsoft.Extensions.Logging;
 using System.Security.Claims;
 using Moq;
 using FluentAssertions;
-using AutoMapper;
+using MapsterMapper;
 
 namespace Andy.Agentic.Tests.Controllers;
 
@@ -208,7 +208,7 @@ public class LLMControllerTests
             .Returns(updateConfig);
 
         // Act
-        var result = await _controller.UpdateLlmConfig(updateConfig);
+        var result = await _controller.UpdateLlmConfig(updateConfig.Id!.Value, updateConfig);
 
         // Assert
         result.Should().BeOfType<ActionResult<LlmConfigDto>>()

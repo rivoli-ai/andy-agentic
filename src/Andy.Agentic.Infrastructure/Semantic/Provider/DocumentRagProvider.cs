@@ -26,7 +26,7 @@ public class DocumentRagProvider(
     private const int MaxChunkSize = 1000;
     private const int OverlapSize = 200;
     private const int EmbeddingDimensions = 4096;
-    private const string ConnectionString = "Host=localhost;Port=5432;Username=postgres;Password=postgres;Database=postgres";
+    private const string ConnectionString = "Host=localhost;Port=5432;Username=agentic_user;Password=agentic_password;Database=agentic_db";
 
     /// <summary>
     /// Searches for relevant document chunks based on the provided query using semantic similarity.

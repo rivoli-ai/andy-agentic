@@ -17,6 +17,8 @@ using Andy.Agentic.Infrastructure.Services;
 using Andy.Agentic.Infrastructure.Services.ToolProviders;
 using Andy.Agentic.Infrastructure.UnitOfWorks;
 using Andy.Agentic.Mcps;
+using Mapster;
+using MapsterMapper;
 using Microsoft.EntityFrameworkCore;
 using Npgsql;
 
@@ -36,7 +38,7 @@ public class Startup(IConfiguration configuration)
     {
         ConfigureWebServices(services);
         ConfigureDatabase(services);
-        ConfigureAutoMapper(services);
+        ConfigureMapster(services);
         ConfigureRepositories(services);
         ConfigureCoreServices(services);
         ConfigureHttpClient(services);
@@ -115,7 +117,7 @@ public class Startup(IConfiguration configuration)
         {
             options.AddPolicy("AllowAngularApp", policy =>
             {
-                policy.WithOrigins("http://localhost:4200")
+                policy.WithOrigins("http://localhost:4200", "http://localhost:4201")
                     .AllowAnyHeader()
                     .AllowAnyMethod()
                     .AllowCredentials();
@@ -144,12 +146,15 @@ public class Startup(IConfiguration configuration)
     }
 
     /// <summary>
-    ///     Configures AutoMapper profiles.
+    ///     Configures Mapster (<see href="https://github.com/MapsterMapper/Mapster" />).
     /// </summary>
-    private void ConfigureAutoMapper(IServiceCollection services)
+    private void ConfigureMapster(IServiceCollection services)
     {
-        services.AddAutoMapper(typeof(EntityMapperProfile));
-        services.AddAutoMapper(typeof(DtosMapperProfile));
+        var config = new TypeAdapterConfig();
+        new EntityMappingRegister().Register(config);
+        new DtosMappingRegister().Register(config);
+        services.AddSingleton(config);
+        services.AddSingleton<IMapper, ServiceMapper>();
     }
 
 

@@ -2,21 +2,18 @@ using Andy.Agentic.Application.Interfaces;
 using Andy.Agentic.Application.Services;
 using Andy.Agentic.Domain.Interfaces.Database;
 using Andy.Agentic.Domain.Models;
-using AutoMapper;
 
 namespace Andy.Agentic.Application.Tests.Services;
 
 public class SimpleToolServiceTests
 {
     private readonly Mock<IDataBaseService> _mockDatabaseService;
-    private readonly Mock<IMapper> _mockMapper;
     private readonly ToolService _toolService;
 
     public SimpleToolServiceTests()
     {
         _mockDatabaseService = new Mock<IDataBaseService>();
-        _mockMapper = new Mock<IMapper>();
-        _toolService = new ToolService(_mockDatabaseService.Object, _mockMapper.Object);
+        _toolService = new ToolService(_mockDatabaseService.Object);
     }
 
     [Fact]

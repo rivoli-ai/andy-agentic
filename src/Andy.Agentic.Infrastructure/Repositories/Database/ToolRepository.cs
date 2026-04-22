@@ -28,6 +28,10 @@ namespace Andy.Agentic.Infrastructure.Repositories.Database
 
         public async Task<ToolEntity> CreateAsync(ToolEntity tool)
         {
+            if (tool.Id == Guid.Empty)
+                tool.Id = Guid.NewGuid();
+
+            tool.CreatedByUser = null;
             tool.CreatedAt = DateTime.UtcNow;
             tool.UpdatedAt = DateTime.UtcNow;
             context.Tools.Add(tool);

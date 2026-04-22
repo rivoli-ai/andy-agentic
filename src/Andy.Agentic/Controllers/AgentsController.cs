@@ -1,7 +1,7 @@
 using Andy.Agentic.Application.DTOs;
 using Andy.Agentic.Application.Interfaces;
 using Andy.Agentic.Domain.Models;
-using AutoMapper;
+using MapsterMapper;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Authorization;
 
@@ -95,7 +95,8 @@ public class AgentsController(IAgentService agentService, IMapper mapper, IAuthS
 
             var agent = mapper.Map<Agent>(createAgentDto);
             agent.CreatedByUserId = currentUser.Id;
-            
+            ApplyLlmConfigIdsFromDto(agent, createAgentDto);
+
             var createdAgent = await agentService.CreateAgentAsync(agent);
             return CreatedAtAction(nameof(GetAgent), new { id = createdAgent.Id }, createdAgent);
         }
@@ -151,6 +152,18 @@ public class AgentsController(IAgentService agentService, IMapper mapper, IAuthS
             agent.CreatedByUserId = existingAgent.CreatedByUserId; // Preserve the original creator
             agent.CreatedAt = existingAgent.CreatedAt; // Preserve the original creation date
             agent.UpdatedAt = DateTime.UtcNow; // Update the modification timestamp
+
+            ApplyLlmConfigIdsFromDto(agent, updateAgentDto);
+
+            // Clients often omit top-level llmConfigId; nested llmConfig.id or prior row is used next.
+            if (agent.LlmConfigId == Guid.Empty)
+                agent.LlmConfigId = existingAgent.LlmConfigId;
+
+            // Do not reset execution metrics when the DTO carries defaults.
+            agent.ExecutionCount = existingAgent.ExecutionCount;
+
+            if (agent.LlmConfigId == Guid.Empty)
+                return BadRequest(new { error = "LLM configuration is required. Set llmConfigId or llmConfig.id." });
             
             var updatedAgent = await agentService.UpdateAgentAsync(agent);
             return Ok(updatedAgent);
@@ -269,5 +282,28 @@ public class AgentsController(IAgentService agentService, IMapper mapper, IAuthS
         {
             return StatusCode(500, new { error = "Internal server error", message = ex.Message });
         }
+    }
+
+    /// <summary>
+    /// UIs often send only <c>llmConfig.id</c> / <c>embeddingLlmConfig.id</c> while leaving flat FK properties default.
+    /// </summary>
+    private static void ApplyLlmConfigIdsFromDto(Agent agent, AgentDto dto)
+    {
+        var chatId = dto.LlmConfig?.Id is Guid dtoChat && dtoChat != Guid.Empty
+            ? dtoChat
+            : agent.LlmConfig is { Id: var lid } && lid != Guid.Empty
+                ? lid
+                : (Guid?)null;
+        if (agent.LlmConfigId == Guid.Empty && chatId is { } cid)
+            agent.LlmConfigId = cid;
+
+        var embedId = dto.EmbeddingLlmConfig?.Id is Guid dtoEmb && dtoEmb != Guid.Empty
+            ? dtoEmb
+            : agent.EmbeddingLlmConfig is { Id: var eid } && eid != Guid.Empty
+                ? eid
+                : (Guid?)null;
+        if ((!agent.EmbeddingLlmConfigId.HasValue || agent.EmbeddingLlmConfigId == Guid.Empty) &&
+            embedId is { } e)
+            agent.EmbeddingLlmConfigId = e;
     }
 }

@@ -7,7 +7,7 @@ using System.Threading.Channels;
 using Andy.Agentic.Domain.Interfaces.Database;
 using Andy.Agentic.Domain.Interfaces.Llm.Semantic;
 using Andy.Agentic.Domain.Interfaces;
-using AutoMapper;
+using MapsterMapper;
 using Microsoft.AspNetCore.SignalR;
 
 namespace Andy.Agentic.Infrastructure.Semantic;
