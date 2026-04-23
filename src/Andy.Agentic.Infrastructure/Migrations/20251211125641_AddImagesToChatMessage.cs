@@ -10,19 +10,21 @@ namespace Andy.Agentic.Infrastructure.Migrations
         /// <inheritdoc />
         protected override void Up(MigrationBuilder migrationBuilder)
         {
-            migrationBuilder.AddColumn<string>(
-                name: "Images",
-                table: "ChatMessages",
-                type: "text",
-                nullable: true);
+            // Idempotent: production DBs may already have "Images" (manual patch or partial run)
+            // while __EFMigrationsHistory still lacks this migration id.
+            migrationBuilder.Sql(
+                """
+                ALTER TABLE "ChatMessages" ADD COLUMN IF NOT EXISTS "Images" text NULL;
+                """);
         }
 
         /// <inheritdoc />
         protected override void Down(MigrationBuilder migrationBuilder)
         {
-            migrationBuilder.DropColumn(
-                name: "Images",
-                table: "ChatMessages");
+            migrationBuilder.Sql(
+                """
+                ALTER TABLE "ChatMessages" DROP COLUMN IF EXISTS "Images";
+                """);
         }
     }
 }
