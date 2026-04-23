@@ -44,8 +44,16 @@ public class Startup(IConfiguration configuration)
         ConfigureHttpClient(services);
         ConfigureToolProviders(services);
 
+        // Legacy /sse (+ message endpoint) is required for MCP clients that use the URL from the agent
+        // integration snippet (e.g. Claude Desktop). Streamable HTTP stays on / when Stateless is false.
         services.AddMcpServer()
-            .WithHttpTransport()
+            .WithHttpTransport(options =>
+            {
+                options.Stateless = false;
+#pragma warning disable MCP9004 // Legacy SSE: opt-in for external MCP clients; prefer streamable HTTP for new clients.
+                options.EnableLegacySse = true;
+#pragma warning restore MCP9004
+            })
             .WithTools<AgentMcp>();
 
         services.AddSemanticKernelBuilder();

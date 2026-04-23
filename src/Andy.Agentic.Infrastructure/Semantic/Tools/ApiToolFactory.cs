@@ -2,6 +2,7 @@ using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
 using Andy.Agentic.Domain.Models;
+using Andy.Agentic.Infrastructure.Services.ToolProviders;
 using Microsoft.SemanticKernel;
 
 namespace Andy.Agentic.Infrastructure.Semantic.Tools;
@@ -55,10 +56,10 @@ public class ApiToolFactory: ToolFactory
             else
             {
                 request.RequestUri = new Uri(endpoint);
-                if (callArgs.Any())
+                var bodyContent = ApiToolRequestBodyBuilder.CreateContent(configuration, callArgs);
+                if (bodyContent != null)
                 {
-                    var json = JsonSerializer.Serialize(callArgs);
-                    request.Content = new StringContent(json, Encoding.UTF8, "application/json");
+                    request.Content = bodyContent;
                 }
             }
 

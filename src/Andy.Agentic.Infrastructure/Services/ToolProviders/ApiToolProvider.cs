@@ -56,9 +56,10 @@ public class ApiToolProvider(HttpClient httpClient) : IToolProvider
             else
             {
                 request.RequestUri = new Uri(endpoint);
-                if (parameters.Any())
+                var bodyContent = ApiToolRequestBodyBuilder.CreateContent(configuration, parameters);
+                if (bodyContent != null)
                 {
-                    request.Content = CreateJsonContent(parameters);
+                    request.Content = bodyContent;
                 }
             }
 
@@ -222,12 +223,6 @@ public class ApiToolProvider(HttpClient httpClient) : IToolProvider
 
         uriBuilder.Query = query.ToString();
         return uriBuilder.Uri;
-    }
-
-    private static StringContent CreateJsonContent(Dictionary<string, object> parameters)
-    {
-        var json = JsonSerializer.Serialize(parameters);
-        return new StringContent(json, Encoding.UTF8, "application/json");
     }
 
     /// <summary>
