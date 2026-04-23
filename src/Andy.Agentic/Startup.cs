@@ -87,18 +87,35 @@ public class Startup(IConfiguration configuration)
     /// <summary>
     ///     Configures JWT Bearer authentication for Microsoft Graph tokens.
     /// </summary>
-    private void ConfigureAuthentication(IServiceCollection services) =>
+    private void ConfigureAuthentication(IServiceCollection services)
+    {
+        var tenantId = configuration["AzureAd:TenantId"];
+        var instance = configuration["AzureAd:Instance"];
+        if (string.IsNullOrWhiteSpace(tenantId) || string.IsNullOrWhiteSpace(instance))
+        {
+            throw new InvalidOperationException("AzureAd:TenantId and AzureAd:Instance must be set for JWT Bearer.");
+        }
+
+        var authorityBase = instance.TrimEnd('/');
+        var issuerV2 = $"{authorityBase}/{tenantId}/v2.0";
+        var issuerV1Login = $"{authorityBase}/{tenantId}/";
+        var issuerV1Sts = $"https://sts.windows.net/{tenantId}/";
+
         services.AddAuthentication("Bearer")
             .AddJwtBearer("Bearer", options =>
             {
-                options.Authority = $"{configuration["AzureAd:Instance"]}{configuration["AzureAd:TenantId"]}/v2.0";
+                // Metadata / signing keys from v2 endpoint; accept v1 + v2 iss claims (avoids "issuer did not match").
+                options.Authority = issuerV2;
                 options.TokenValidationParameters = new Microsoft.IdentityModel.Tokens.TokenValidationParameters
                 {
                     ValidateAudience = true,
                     ValidAudiences = [$"{configuration["AzureAd:Audience"]}", $"{configuration["AzureAd:ClientId"]}"],
+                    ValidateIssuer = true,
+                    ValidIssuers = [issuerV2, issuerV1Login, issuerV1Sts],
                     RoleClaimType = "http://schemas.microsoft.com/ws/2008/06/identity/claims/role"
                 };
             });
+    }
 
     /// <summary>
     ///     Configures authorization policies.
