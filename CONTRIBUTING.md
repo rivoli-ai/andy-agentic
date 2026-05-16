@@ -1,6 +1,6 @@
-# Contributing to Andy.Llm
+# Contributing to Andy.Agentic
 
-Thank you for your interest in contributing to Andy.Llm! We welcome contributions from the community and are grateful for any help you can provide.
+Thank you for your interest in contributing to Andy.Agentic! We welcome contributions from the community and are grateful for any help you can provide.
 
 ## Code of Conduct
 
@@ -24,8 +24,8 @@ By participating in this project, you agree to abide by our Code of Conduct:
 
 1. **Fork and Clone**
    ```bash
-   git clone https://github.com/your-username/andy-llm.git
-   cd andy-llm
+   git clone https://github.com/your-username/andy-agentic.git
+   cd andy-agentic
    ```
 
 2. **Create a Feature Branch**
@@ -123,14 +123,6 @@ By participating in this project, you agree to abide by our Code of Conduct:
    - Add to architecture docs for design changes
    - Keep examples current
 
-### Adding New Providers
-
-1. Implement `ILlmProvider` interface
-2. Add configuration in `ProviderConfig`
-3. Register in `LlmProviderFactory`
-4. Add integration tests
-5. Update documentation
-
 ### Performance Considerations
 
 - Use async/await properly
@@ -166,4 +158,4 @@ Contributors will be recognized in:
 - Contributors list
 - Project documentation
 
-Thank you for contributing to Andy.Llm!
+Thank you for contributing to Andy.Agentic!

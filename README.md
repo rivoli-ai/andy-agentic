@@ -77,9 +77,9 @@ andy-agentic/
 ├── src/
 │   └── Andy.Agentic/           # Main ASP.NET Core application
 │       ├── Controllers/        # API controllers
-│       ├── Models/            # Data models
-│       ├── Services/          # Business logic
-│       └── Program.cs         # Application entry point
+│       ├── Properties/         # launchSettings.json
+│       ├── appsettings.json    # Configuration
+│       └── Program.cs          # Application entry point
 ├── tests/
 │   └── Andy.Agentic.Tests/    # Unit and integration tests
 ├── docs/                       # Documentation
