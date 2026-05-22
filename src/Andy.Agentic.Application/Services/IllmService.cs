@@ -354,11 +354,12 @@ public class LlmService(
             }
 
             logger.LogInformation(
-                "SendToLlmProviderStream completed (raw reasoning): sessionId={SessionId}, totalChunks={TotalChunks}, contentChunks={ContentChunks}, thinkingChunks={ThinkingChunks}",
+                "SendToLlmProviderStream completed (raw reasoning): sessionId={SessionId}, totalChunks={TotalChunks}, contentChunks={ContentChunks}, thinkingChunks={ThinkingChunks}, vllmStyleQwen={VllmStyleQwen}",
                 session,
                 chunkCount,
                 contentChunkCount,
-                thinkingChunkCount);
+                thinkingChunkCount,
+                ThinkingModelSupport.UsesVllmStyleQwenThinkingRequest(agent.LlmConfig));
             yield break;
         }
 
@@ -370,7 +371,7 @@ public class LlmService(
             chunkCount++;
             var content = chunk.Content ?? string.Empty;
 
-            if (content.Contains("<think>") || content.Contains("<|begin_of_box|>"))
+            if (content.Contains("\u003cthink\u003e") || content.Contains("<|begin_of_box|>"))
             {
                 isThinking = true;
                 logger.LogDebug("SendToLlmProviderStream chunk #{ChunkIndex}: entering thinking mode", chunkCount);
@@ -379,7 +380,7 @@ public class LlmService(
 
             if (isThinking)
             {
-                if (content.Contains("</think>") || content.Contains("<|end_of_box|>"))
+                if (content.Contains("\u003c/think\u003e") || content.Contains("<|end_of_box|>"))
                 {
                     isThinking = false;
                     logger.LogDebug("SendToLlmProviderStream chunk #{ChunkIndex}: exiting thinking mode", chunkCount);

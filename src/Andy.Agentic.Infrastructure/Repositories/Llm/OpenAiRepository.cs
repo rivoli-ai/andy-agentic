@@ -39,6 +39,7 @@ public class OpenAiRepository : ILLmProviderRepository
     private const string DeltaProperty = "delta";
     private const string ContentProperty = "content";
     private const string ReasoningContentProperty = "reasoning_content";
+    private const string ReasoningProperty = "reasoning";
     private const string ToolCallsProperty = "tool_calls";
     private const string FunctionProperty = "function";
     private const string IdProperty = "id";
@@ -589,7 +590,7 @@ public class OpenAiRepository : ILLmProviderRepository
     {
         await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
         using var reader = new StreamReader(stream, Encoding.UTF8, true);
-        var responseStarted = false;
+        var reasoningProcessor = new ReasoningStreamDeltaProcessor();
 
         while (await reader.ReadLineAsync(cancellationToken) is { } line)
         {
@@ -608,20 +609,11 @@ public class OpenAiRepository : ILLmProviderRepository
 
             MergeStreamingToolCalls(jsonContent, toolCallsByIndex);
 
-            var (reasoning, content, _, _) = ParseOpenAiStreamingDelta(jsonContent);
+            var (reasoningContent, reasoning, content, _, _) = ParseOpenAiStreamingDelta(jsonContent);
 
-            // Hybrid thinking models may mirror partial text in both fields during the reasoning
-            // phase. Prefer reasoning until the answer phase begins (content-only deltas).
-            if (!string.IsNullOrEmpty(reasoning) && !responseStarted)
+            foreach (var chunk in reasoningProcessor.Process(reasoningContent, reasoning, content))
             {
-                yield return new StreamingResult { Thinking = reasoning };
-                continue;
-            }
-
-            if (!string.IsNullOrEmpty(content))
-            {
-                responseStarted = true;
-                yield return new StreamingResult { Content = content };
+                yield return chunk;
             }
         }
     }
@@ -750,21 +742,22 @@ public class OpenAiRepository : ILLmProviderRepository
     /// <returns>A tuple containing content, tool calls flag, and parsed tool calls.</returns>
     private static (string Content, bool HasToolCalls, List<ToolCall> ToolCalls) ParseOpenAiStreamingResponse(string jsonContent)
     {
-        var (reasoning, content, hasToolCalls, toolCalls) = ParseOpenAiStreamingDelta(jsonContent);
-        if (!string.IsNullOrEmpty(reasoning) && string.IsNullOrEmpty(content))
+        var (reasoningContent, reasoning, content, hasToolCalls, toolCalls) = ParseOpenAiStreamingDelta(jsonContent);
+        var mergedReasoning = !string.IsNullOrEmpty(reasoningContent) ? reasoningContent : reasoning;
+        if (!string.IsNullOrEmpty(mergedReasoning) && string.IsNullOrEmpty(content))
         {
-            return (reasoning, hasToolCalls, toolCalls);
+            return (mergedReasoning, hasToolCalls, toolCalls);
         }
 
         return (content, hasToolCalls, toolCalls);
     }
 
-    private static (string? Reasoning, string Content, bool HasToolCalls, List<ToolCall> ToolCalls) ParseOpenAiStreamingDelta(
+    private static (string? ReasoningContent, string? Reasoning, string Content, bool HasToolCalls, List<ToolCall> ToolCalls) ParseOpenAiStreamingDelta(
         string jsonContent)
     {
         if (string.IsNullOrWhiteSpace(jsonContent))
         {
-            return (null, string.Empty, false, new List<ToolCall>());
+            return (null, null, string.Empty, false, new List<ToolCall>());
         }
 
         try
@@ -774,25 +767,32 @@ public class OpenAiRepository : ILLmProviderRepository
             if (!jsonDoc.RootElement.TryGetProperty(ChoicesProperty, out var choicesElement) ||
                 choicesElement.GetArrayLength() == 0)
             {
-                return (null, string.Empty, false, new List<ToolCall>());
+                return (null, null, string.Empty, false, new List<ToolCall>());
             }
 
             var firstChoice = choicesElement.EnumerateArray().First();
 
             if (!firstChoice.TryGetProperty(DeltaProperty, out var deltaElement))
             {
-                return (null, string.Empty, false, new List<ToolCall>());
+                return (null, null, string.Empty, false, new List<ToolCall>());
             }
 
             if (deltaElement.TryGetProperty(ToolCallsProperty, out var toolCallsElement) &&
                 toolCallsElement.ValueKind != JsonValueKind.Null)
             {
                 var toolCalls = ParseToolCallsFromChunk(toolCallsElement);
-                return (null, string.Empty, true, toolCalls);
+                return (null, null, string.Empty, true, toolCalls);
+            }
+
+            string? reasoningContent = null;
+            if (deltaElement.TryGetProperty(ReasoningContentProperty, out var reasoningContentElement)
+                && reasoningContentElement.ValueKind == JsonValueKind.String)
+            {
+                reasoningContent = reasoningContentElement.GetString();
             }
 
             string? reasoning = null;
-            if (deltaElement.TryGetProperty(ReasoningContentProperty, out var reasoningElement)
+            if (deltaElement.TryGetProperty(ReasoningProperty, out var reasoningElement)
                 && reasoningElement.ValueKind == JsonValueKind.String)
             {
                 reasoning = reasoningElement.GetString();
@@ -805,11 +805,11 @@ public class OpenAiRepository : ILLmProviderRepository
                 content = deltaContentElement.GetString() ?? string.Empty;
             }
 
-            return (reasoning, content, false, new List<ToolCall>());
+            return (reasoningContent, reasoning, content, false, new List<ToolCall>());
         }
         catch (JsonException)
         {
-            return (null, jsonContent, false, new List<ToolCall>());
+            return (null, null, jsonContent, false, new List<ToolCall>());
         }
     }
 

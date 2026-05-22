@@ -106,6 +106,55 @@ public class ThinkingModelSupportTests
     }
 
     [Fact]
+    public void GetToolPathThinkingDisableOverrides_QwenSelfHosted_IncludesChatTemplateKwargs()
+    {
+        var config = new LlmConfig
+        {
+            Model = "qwen3.6-27b",
+            BaseUrl = "https://vllm.internal.company/v1",
+        };
+
+        var overrides = ThinkingModelSupport.GetToolPathThinkingDisableOverrides(config);
+
+        Assert.NotNull(overrides);
+        Assert.False(Assert.IsType<bool>(overrides["enable_thinking"]));
+        Assert.True(overrides.ContainsKey("chat_template_kwargs"));
+    }
+
+    [Fact]
+    public void ApplyThinkingRequestOptions_VllmQwen_SetsChatTemplateKwargs()
+    {
+        var config = new LlmConfig
+        {
+            Model = "qwen3.6-27b",
+            BaseUrl = "http://llm-gpu-01:8000/v1",
+        };
+        var request = new Dictionary<string, object>();
+
+        ThinkingModelSupport.ApplyThinkingRequestOptions(config, request, disableThinking: false);
+
+        Assert.True(Assert.IsType<bool>(request["enable_thinking"]));
+        var kwargs = Assert.IsType<Dictionary<string, object>>(request["chat_template_kwargs"]);
+        Assert.True(Assert.IsType<bool>(kwargs["enable_thinking"]));
+    }
+
+    [Fact]
+    public void ApplyThinkingRequestOptions_DashScopeQwen_UsesTopLevelEnableThinking()
+    {
+        var config = new LlmConfig
+        {
+            Model = "qwen3.6-plus",
+            BaseUrl = "https://dashscope.aliyuncs.com/compatible-mode/v1",
+        };
+        var request = new Dictionary<string, object>();
+
+        ThinkingModelSupport.ApplyThinkingRequestOptions(config, request, disableThinking: false);
+
+        Assert.True(Assert.IsType<bool>(request["enable_thinking"]));
+        Assert.False(request.ContainsKey("chat_template_kwargs"));
+    }
+
+    [Fact]
     public void ApplyThinkingRequestOptions_WhenDisableThinking_SkipsEnableThinkingForQwen()
     {
         var config = new LlmConfig { Model = "qwen3.5-plus" };

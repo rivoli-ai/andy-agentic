@@ -28,7 +28,25 @@ public static class ThinkingModelSupport
 
     public static bool IsQwenThinkingModel(string? model) =>
         !string.IsNullOrWhiteSpace(model)
-        && model.Contains("qwen", StringComparison.OrdinalIgnoreCase);
+        && (model.Contains("qwen", StringComparison.OrdinalIgnoreCase)
+            || model.Contains("qwq", StringComparison.OrdinalIgnoreCase));
+
+    /// <summary>
+    /// DashScope / Qwen Cloud use top-level <c>enable_thinking</c> and stream
+    /// <c>delta.reasoning_content</c>.
+    /// </summary>
+    public static bool IsDashScopeQwenEndpoint(string? baseUrl) =>
+        !string.IsNullOrWhiteSpace(baseUrl)
+        && (baseUrl.Contains("dashscope", StringComparison.OrdinalIgnoreCase)
+            || baseUrl.Contains("aliyuncs", StringComparison.OrdinalIgnoreCase)
+            || baseUrl.Contains("qwencloud", StringComparison.OrdinalIgnoreCase));
+
+    /// <summary>
+    /// vLLM and most self-hosted OpenAI gateways expect
+    /// <c>chat_template_kwargs.enable_thinking</c> and stream <c>delta.reasoning</c>.
+    /// </summary>
+    public static bool UsesVllmStyleQwenThinkingRequest(LlmConfig config) =>
+        IsQwenThinkingModel(config.Model) && !IsDashScopeQwenEndpoint(config.BaseUrl);
 
     /// <summary>
     /// Models known to expose <c>reasoning_content</c> in streaming chat completion deltas.
@@ -66,10 +84,24 @@ public static class ThinkingModelSupport
 
         if (IsQwenThinkingModel(config.Model))
         {
-            return new Dictionary<string, object> { ["enable_thinking"] = false };
+            return CreateQwenThinkingDisableOverrides(config);
         }
 
         return null;
+    }
+
+    private static Dictionary<string, object> CreateQwenThinkingDisableOverrides(LlmConfig config)
+    {
+        if (IsDashScopeQwenEndpoint(config.BaseUrl))
+        {
+            return new Dictionary<string, object> { ["enable_thinking"] = false };
+        }
+
+        return new Dictionary<string, object>
+        {
+            ["enable_thinking"] = false,
+            ["chat_template_kwargs"] = new Dictionary<string, object> { ["enable_thinking"] = false },
+        };
     }
 
     /// <summary>
@@ -93,7 +125,7 @@ public static class ThinkingModelSupport
 
         if (IsQwenThinkingModel(config.Model))
         {
-            request["enable_thinking"] = true;
+            ApplyQwenThinkingEnableOptions(config, request);
             return;
         }
 
@@ -208,5 +240,17 @@ public static class ThinkingModelSupport
 
         request["frequency_penalty"] = config.FrequencyPenalty ?? 0.0;
         request["presence_penalty"] = config.PresencePenalty ?? 0.0;
+    }
+
+    private static void ApplyQwenThinkingEnableOptions(LlmConfig config, IDictionary<string, object> request)
+    {
+        if (IsDashScopeQwenEndpoint(config.BaseUrl))
+        {
+            request["enable_thinking"] = true;
+            return;
+        }
+
+        request["chat_template_kwargs"] = new Dictionary<string, object> { ["enable_thinking"] = true };
+        request["enable_thinking"] = true;
     }
 }
