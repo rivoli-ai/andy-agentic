@@ -1,3 +1,4 @@
+using Andy.Agentic.Domain.Helpers;
 using Andy.Agentic.Domain.Interfaces;
 using Andy.Agentic.Domain.Models;
 using System.Text;
@@ -78,7 +79,8 @@ public class ApiToolProvider(HttpClient httpClient) : IToolProvider
     /// </summary>
     /// <param name="toolType"></param>
     /// <returns></returns>
-    public bool CanHandleToolType(string toolType) => string.Equals(toolType, ToolType, StringComparison.OrdinalIgnoreCase);
+    public bool CanHandleToolType(string toolType) =>
+        ToolTypeHelper.Matches(Domain.Models.Semantic.ToolType.ApiTool, toolType);
 
     private static Dictionary<string, object> ParseConfiguration(string? configuration)
     {

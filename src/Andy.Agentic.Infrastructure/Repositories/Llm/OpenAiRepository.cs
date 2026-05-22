@@ -1,12 +1,15 @@
 using Andy.Agentic.Domain.Interfaces.Llm;
+using Andy.Agentic.Domain.Helpers;
 using Andy.Agentic.Domain.Models;
 using ModelContextProtocol.Protocol;
 using OpenAI;
 using OpenAI.Chat;
 using System.ClientModel;
+using System.Runtime.CompilerServices;
 using System.Text;
 using System.Text.Encodings.Web;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
 using Microsoft.Extensions.AI;
 
@@ -35,6 +38,7 @@ public class OpenAiRepository : ILLmProviderRepository
     private const string ChoicesProperty = "choices";
     private const string DeltaProperty = "delta";
     private const string ContentProperty = "content";
+    private const string ReasoningContentProperty = "reasoning_content";
     private const string ToolCallsProperty = "tool_calls";
     private const string FunctionProperty = "function";
     private const string IdProperty = "id";
@@ -49,7 +53,8 @@ public class OpenAiRepository : ILLmProviderRepository
     private readonly HttpClient _httpClient;
     private static readonly JsonSerializerOptions StreamSerializerOptions = new()
     {
-        Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping
+        Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
+        DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
     };
 
     #endregion
@@ -205,7 +210,8 @@ public class OpenAiRepository : ILLmProviderRepository
         
         try
         {
-            response = await _httpClient.PostAsync(endpoint, content);
+            using var request = new HttpRequestMessage(HttpMethod.Post, endpoint) { Content = content };
+            response = await _httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead);
         }
         catch (Exception ex)
         {
@@ -235,6 +241,155 @@ public class OpenAiRepository : ILLmProviderRepository
         {
             yield return chunk;
         }
+    }
+
+    /// <inheritdoc />
+    public async IAsyncEnumerable<StreamingResult> StreamChatMessagesAsync(
+        LlmConfig config,
+        IReadOnlyList<ChatHistory> messages,
+        IReadOnlyList<OpenAiTool>? tools = null,
+        [EnumeratorCancellation] CancellationToken cancellationToken = default)
+    {
+        await foreach (var chunk in StreamThinkingChatAsync(config, messages, tools, executeTools: null, cancellationToken))
+        {
+            yield return chunk;
+        }
+    }
+
+    /// <inheritdoc />
+    public async IAsyncEnumerable<StreamingResult> StreamThinkingChatAsync(
+        LlmConfig config,
+        IReadOnlyList<ChatHistory> messages,
+        IReadOnlyList<OpenAiTool>? tools,
+        ToolCallExecutor? executeTools,
+        [EnumeratorCancellation] CancellationToken cancellationToken = default)
+    {
+        var conversation = ChatCompletionConversation.FromHistory(messages);
+        const int maxToolRounds = 8;
+
+        for (var round = 0; round < maxToolRounds; round++)
+        {
+            List<ToolCall>? pendingToolCalls = null;
+
+            await foreach (var chunk in StreamConversationAsync(config, conversation, tools, cancellationToken))
+            {
+                if (chunk.ToolCalls is { Count: > 0 })
+                {
+                    pendingToolCalls = chunk.ToolCalls;
+                    continue;
+                }
+
+                yield return chunk;
+            }
+
+            if (pendingToolCalls is not { Count: > 0 } || executeTools is null)
+            {
+                yield break;
+            }
+
+            var toolResults = await executeTools(pendingToolCalls, cancellationToken);
+            conversation.AddToolResults(pendingToolCalls, toolResults);
+        }
+    }
+
+    private async IAsyncEnumerable<StreamingResult> StreamConversationAsync(
+        LlmConfig config,
+        ChatCompletionConversation conversation,
+        IReadOnlyList<OpenAiTool>? tools = null,
+        [EnumeratorCancellation] CancellationToken cancellationToken = default)
+    {
+        var endpoint = $"{config.BaseUrl.TrimEnd('/')}{ChatCompletionsEndpoint}";
+        var requestBody = CreateChatCompletionsRequest(conversation, config, tools);
+        var json = JsonSerializer.Serialize(requestBody, StreamSerializerOptions);
+        json = ThinkingModelRequestPatcher.PatchChatCompletionsRequest(json);
+
+        using var content = new StringContent(json, Encoding.UTF8, ContentType);
+        ConfigureHttpClientHeaders(config);
+
+        HttpResponseMessage? response = null;
+        string? errorMessage = null;
+
+        try
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Post, endpoint) { Content = content };
+            response = await _httpClient.SendAsync(
+                request,
+                HttpCompletionOption.ResponseHeadersRead,
+                cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            errorMessage = $"Error: Failed to communicate with OpenAI: {ex.Message}";
+        }
+
+        if (!string.IsNullOrEmpty(errorMessage))
+        {
+            yield return new StreamingResult { Content = errorMessage };
+            yield break;
+        }
+
+        if (response == null)
+        {
+            yield return new StreamingResult { Content = "Error: No response from OpenAI" };
+            yield break;
+        }
+
+        if (!response.IsSuccessStatusCode)
+        {
+            var errorContent = await response.Content.ReadAsStringAsync(cancellationToken);
+            yield return new StreamingResult
+            {
+                Content = $"Error: OpenAI API error: {response.StatusCode} - {errorContent}"
+            };
+            yield break;
+        }
+
+        var toolCallsByIndex = new Dictionary<int, AggregatedToolCall>();
+        var assistantReasoning = new StringBuilder();
+        var assistantContent = new StringBuilder();
+
+        await foreach (var chunk in ProcessOpenAiStreamingResultsAsync(response, toolCallsByIndex, cancellationToken))
+        {
+            if (!string.IsNullOrEmpty(chunk.Thinking))
+            {
+                assistantReasoning.Append(chunk.Thinking);
+            }
+
+            if (!string.IsNullOrEmpty(chunk.Content))
+            {
+                assistantContent.Append(chunk.Content);
+            }
+
+            if (chunk.ToolCalls is not { Count: > 0 })
+            {
+                yield return chunk;
+            }
+        }
+
+        if (toolCallsByIndex.Count == 0)
+        {
+            yield break;
+        }
+
+        var toolCalls = toolCallsByIndex
+            .OrderBy(kv => kv.Key)
+            .Select(kv => new ToolCall
+            {
+                Id = kv.Value.Id ?? string.Empty,
+                Function = new ToolCallFunction
+                {
+                    Name = kv.Value.Name ?? string.Empty,
+                    Arguments = kv.Value.Arguments,
+                },
+            })
+            .ToList();
+
+        conversation.AddAssistantToolTurn(
+            assistantReasoning.ToString(),
+            assistantContent.ToString(),
+            toolCalls);
+
+        yield return new StreamingResult { ToolCalls = toolCalls };
     }
 
     #endregion
@@ -268,10 +423,20 @@ public class OpenAiRepository : ILLmProviderRepository
     {
         var options = new ChatCompletionOptions
         {
-            Temperature = (float?)config.Temperature,
-            TopP = (float?)config.TopP,
-            FrequencyPenalty = (float?)config.FrequencyPenalty,
-            PresencePenalty = (float?)config.PresencePenalty
+            Temperature = ThinkingModelSupport.TryResolveTemperature(config, out var temperature)
+                ? (float?)temperature
+                : null,
+            TopP = ThinkingModelSupport.TryResolveTopP(config, out var topP)
+                ? (float?)topP
+                : null,
+            FrequencyPenalty = ThinkingModelSupport.IsKimiThinkingModel(config.Model)
+                || ThinkingModelSupport.IsMoonshotEndpoint(config.BaseUrl)
+                ? null
+                : (float?)config.FrequencyPenalty,
+            PresencePenalty = ThinkingModelSupport.IsKimiThinkingModel(config.Model)
+                || ThinkingModelSupport.IsMoonshotEndpoint(config.BaseUrl)
+                ? null
+                : (float?)config.PresencePenalty
         };
 
         JsonSerializerOptions jsonOptions = new()
@@ -313,11 +478,9 @@ public class OpenAiRepository : ILLmProviderRepository
             ["messages"] = new[] { new { role = UserRole, content = message } },
             ["stream"] = true,
             ["max_tokens"] = llmConfig.MaxTokens ?? 4000,
-            ["temperature"] = llmConfig.Temperature ?? 0.7,
-            ["top_p"] = llmConfig.TopP ?? 1.0,
-            ["frequency_penalty"] = llmConfig.FrequencyPenalty ?? 0.0,
-            ["presence_penalty"] = llmConfig.PresencePenalty ?? 0.0
         };
+        ThinkingModelSupport.ApplySamplingParameters(llmConfig, baseRequest);
+        ThinkingModelSupport.ApplyThinkingRequestOptions(llmConfig, baseRequest);
 
         if (tools?.Any() == true)
         {
@@ -326,6 +489,68 @@ public class OpenAiRepository : ILLmProviderRepository
         }
 
         return baseRequest;
+    }
+
+    private static Dictionary<string, object> CreateChatCompletionsRequest(
+        ChatCompletionConversation conversation,
+        LlmConfig llmConfig,
+        IReadOnlyList<OpenAiTool>? tools)
+    {
+        var request = new Dictionary<string, object>
+        {
+            ["model"] = llmConfig.Model,
+            ["messages"] = conversation.Messages,
+            ["stream"] = true,
+            ["max_tokens"] = llmConfig.MaxTokens ?? 4000,
+        };
+        var disableThinking = ThinkingModelSupport.ConversationHasToolCallHistory(conversation.Messages);
+        ThinkingModelSupport.ApplySamplingParameters(llmConfig, request, disableThinking: disableThinking);
+        ThinkingModelSupport.ApplyThinkingRequestOptions(llmConfig, request, disableThinking: disableThinking);
+
+        if (tools is { Count: > 0 })
+        {
+            request["tools"] = ThinkingModelSupport.RequiresMoonshotToolSchema(llmConfig.Model, llmConfig.BaseUrl)
+                ? BuildMoonshotToolsJson(tools)
+                : tools;
+            request["tool_choice"] = ToolChoiceAuto;
+        }
+
+        return request;
+    }
+
+    private static JsonArray BuildMoonshotToolsJson(IReadOnlyList<OpenAiTool> tools)
+    {
+        var toolsArray = new JsonArray();
+
+        foreach (var tool in tools)
+        {
+            var parametersNode = JsonSerializer.SerializeToNode(tool.Function.Parameters, StreamSerializerOptions);
+            if (parametersNode is JsonObject parametersObject)
+            {
+                MoonshotToolSchemaSanitizer.SanitizeParametersObject(parametersObject);
+            }
+
+            toolsArray.Add(new JsonObject
+            {
+                [TypeProperty] = tool.Type,
+                [FunctionProperty] = new JsonObject
+                {
+                    [NameProperty] = tool.Function.Name,
+                    [DescriptionProperty] = tool.Function.Description,
+                    ["parameters"] = parametersNode ?? new JsonObject { ["type"] = "object", ["properties"] = new JsonObject() },
+                },
+            });
+        }
+
+        return toolsArray;
+    }
+
+    private const string DescriptionProperty = "description";
+
+    private static object CreateChatCompletionsRequestFromHistory(LlmConfig llmConfig, IReadOnlyList<ChatHistory> messages)
+    {
+        var conversation = ChatCompletionConversation.FromHistory(messages);
+        return CreateChatCompletionsRequest(conversation, llmConfig, tools: null);
     }
 
     /// <summary>
@@ -356,6 +581,111 @@ public class OpenAiRepository : ILLmProviderRepository
     #endregion
 
     #region Private Helper Methods - Stream Processing
+
+    private static async IAsyncEnumerable<StreamingResult> ProcessOpenAiStreamingResultsAsync(
+        HttpResponseMessage response,
+        Dictionary<int, AggregatedToolCall> toolCallsByIndex,
+        [EnumeratorCancellation] CancellationToken cancellationToken = default)
+    {
+        await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
+        using var reader = new StreamReader(stream, Encoding.UTF8, true);
+        var responseStarted = false;
+
+        while (await reader.ReadLineAsync(cancellationToken) is { } line)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            if (string.IsNullOrWhiteSpace(line))
+            {
+                continue;
+            }
+
+            var jsonContent = ExtractJsonFromStreamLine(line);
+            if (string.IsNullOrEmpty(jsonContent))
+            {
+                continue;
+            }
+
+            MergeStreamingToolCalls(jsonContent, toolCallsByIndex);
+
+            var (reasoning, content, _, _) = ParseOpenAiStreamingDelta(jsonContent);
+
+            // Hybrid thinking models may mirror partial text in both fields during the reasoning
+            // phase. Prefer reasoning until the answer phase begins (content-only deltas).
+            if (!string.IsNullOrEmpty(reasoning) && !responseStarted)
+            {
+                yield return new StreamingResult { Thinking = reasoning };
+                continue;
+            }
+
+            if (!string.IsNullOrEmpty(content))
+            {
+                responseStarted = true;
+                yield return new StreamingResult { Content = content };
+            }
+        }
+    }
+
+    private static void MergeStreamingToolCalls(string jsonContent, Dictionary<int, AggregatedToolCall> toolCallsByIndex)
+    {
+        try
+        {
+            using var jsonDoc = JsonDocument.Parse(jsonContent);
+            if (!jsonDoc.RootElement.TryGetProperty(ChoicesProperty, out var choicesElement)
+                || choicesElement.GetArrayLength() == 0)
+            {
+                return;
+            }
+
+            var firstChoice = choicesElement.EnumerateArray().First();
+            if (!firstChoice.TryGetProperty(DeltaProperty, out var deltaElement)
+                || !deltaElement.TryGetProperty(ToolCallsProperty, out var toolCallsElement)
+                || toolCallsElement.ValueKind != JsonValueKind.Array)
+            {
+                return;
+            }
+
+            foreach (var toolCallElement in toolCallsElement.EnumerateArray())
+            {
+                var index = toolCallElement.TryGetProperty("index", out var indexElement)
+                    ? indexElement.GetInt32()
+                    : 0;
+
+                if (!toolCallsByIndex.TryGetValue(index, out var aggregated))
+                {
+                    aggregated = new AggregatedToolCall { Index = index };
+                    toolCallsByIndex[index] = aggregated;
+                }
+
+                if (toolCallElement.TryGetProperty(IdProperty, out var idElement)
+                    && idElement.ValueKind == JsonValueKind.String
+                    && !string.IsNullOrEmpty(idElement.GetString()))
+                {
+                    aggregated.Id = idElement.GetString();
+                }
+
+                if (toolCallElement.TryGetProperty(FunctionProperty, out var functionElement))
+                {
+                    if (functionElement.TryGetProperty(NameProperty, out var nameElement)
+                        && nameElement.ValueKind == JsonValueKind.String
+                        && !string.IsNullOrEmpty(nameElement.GetString()))
+                    {
+                        aggregated.Name = nameElement.GetString();
+                    }
+
+                    if (functionElement.TryGetProperty(ArgumentsProperty, out var argumentsElement)
+                        && argumentsElement.ValueKind == JsonValueKind.String)
+                    {
+                        aggregated.ArgumentsBuffer.Append(argumentsElement.GetString());
+                    }
+                }
+            }
+        }
+        catch (JsonException)
+        {
+            // Ignore malformed SSE chunks.
+        }
+    }
 
     /// <summary>
     /// Processes the streaming response from OpenAI API and yields content chunks.
@@ -420,9 +750,21 @@ public class OpenAiRepository : ILLmProviderRepository
     /// <returns>A tuple containing content, tool calls flag, and parsed tool calls.</returns>
     private static (string Content, bool HasToolCalls, List<ToolCall> ToolCalls) ParseOpenAiStreamingResponse(string jsonContent)
     {
+        var (reasoning, content, hasToolCalls, toolCalls) = ParseOpenAiStreamingDelta(jsonContent);
+        if (!string.IsNullOrEmpty(reasoning) && string.IsNullOrEmpty(content))
+        {
+            return (reasoning, hasToolCalls, toolCalls);
+        }
+
+        return (content, hasToolCalls, toolCalls);
+    }
+
+    private static (string? Reasoning, string Content, bool HasToolCalls, List<ToolCall> ToolCalls) ParseOpenAiStreamingDelta(
+        string jsonContent)
+    {
         if (string.IsNullOrWhiteSpace(jsonContent))
         {
-            return (string.Empty, false, new List<ToolCall>());
+            return (null, string.Empty, false, new List<ToolCall>());
         }
 
         try
@@ -432,35 +774,42 @@ public class OpenAiRepository : ILLmProviderRepository
             if (!jsonDoc.RootElement.TryGetProperty(ChoicesProperty, out var choicesElement) ||
                 choicesElement.GetArrayLength() == 0)
             {
-                return (string.Empty, false, new List<ToolCall>());
+                return (null, string.Empty, false, new List<ToolCall>());
             }
 
             var firstChoice = choicesElement.EnumerateArray().First();
 
             if (!firstChoice.TryGetProperty(DeltaProperty, out var deltaElement))
             {
-                return (string.Empty, false, new List<ToolCall>());
+                return (null, string.Empty, false, new List<ToolCall>());
             }
 
-            // Check for tool calls first (priority)
             if (deltaElement.TryGetProperty(ToolCallsProperty, out var toolCallsElement) &&
                 toolCallsElement.ValueKind != JsonValueKind.Null)
             {
                 var toolCalls = ParseToolCallsFromChunk(toolCallsElement);
-                return (string.Empty, true, toolCalls);
+                return (null, string.Empty, true, toolCalls);
             }
 
-            // Check for content
-            if (deltaElement.TryGetProperty(ContentProperty, out var deltaContentElement))
+            string? reasoning = null;
+            if (deltaElement.TryGetProperty(ReasoningContentProperty, out var reasoningElement)
+                && reasoningElement.ValueKind == JsonValueKind.String)
             {
-                return (deltaContentElement.GetString() ?? string.Empty, false, new List<ToolCall>());
+                reasoning = reasoningElement.GetString();
             }
 
-            return (string.Empty, false, new List<ToolCall>());
+            var content = string.Empty;
+            if (deltaElement.TryGetProperty(ContentProperty, out var deltaContentElement)
+                && deltaContentElement.ValueKind == JsonValueKind.String)
+            {
+                content = deltaContentElement.GetString() ?? string.Empty;
+            }
+
+            return (reasoning, content, false, new List<ToolCall>());
         }
         catch (JsonException)
         {
-            return (jsonContent, false, new List<ToolCall>());
+            return (null, jsonContent, false, new List<ToolCall>());
         }
     }
 

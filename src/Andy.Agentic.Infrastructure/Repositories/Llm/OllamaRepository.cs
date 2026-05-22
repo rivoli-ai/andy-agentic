@@ -25,6 +25,21 @@ public class OllamaRepository(HttpClient httpClient) : ILLmProviderRepository
     public IAsyncEnumerable<StreamingResult> StreamChatWithTools(LlmConfig config, List<ChatHistory> message,
         List<OpenAiTool> tools) => throw new NotImplementedException();
 
+    public IAsyncEnumerable<StreamingResult> StreamChatMessagesAsync(
+        LlmConfig config,
+        IReadOnlyList<ChatHistory> messages,
+        IReadOnlyList<OpenAiTool>? tools = null,
+        CancellationToken cancellationToken = default) =>
+        throw new NotSupportedException("Raw chat message streaming is not supported for Ollama.");
+
+    public IAsyncEnumerable<StreamingResult> StreamThinkingChatAsync(
+        LlmConfig config,
+        IReadOnlyList<ChatHistory> messages,
+        IReadOnlyList<OpenAiTool>? tools,
+        ToolCallExecutor? executeTools,
+        CancellationToken cancellationToken = default) =>
+        throw new NotSupportedException("Thinking chat streaming is not supported for Ollama.");
+
     public bool CanHandleProvider(string provider)
     {
         return provider.Equals("ollama", StringComparison.OrdinalIgnoreCase);

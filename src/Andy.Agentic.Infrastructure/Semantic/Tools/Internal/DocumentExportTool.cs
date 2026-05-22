@@ -183,7 +183,8 @@ public class  DocumentExportTool(
             return null;
         }
 
-        var azureAdId = httpContext.User.FindFirst("oid")?.Value ??
+        var azureAdId = httpContext.User.FindFirst("sub")?.Value ??
+                        httpContext.User.FindFirst("oid")?.Value ??
                         httpContext.User.FindFirst("http://schemas.microsoft.com/identity/claims/objectidentifier")?.Value;
 
         if (string.IsNullOrEmpty(azureAdId))

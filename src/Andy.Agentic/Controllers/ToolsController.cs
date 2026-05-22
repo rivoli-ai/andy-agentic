@@ -250,7 +250,9 @@ public class ToolsController(IToolService toolService, IMapper mapper, IMcpServi
     [HttpGet("discover-mcp")]
     public async Task<ActionResult<McpToolDiscoveryResponse>> DiscoverMcpTools(
         [FromQuery] string url,
-        [FromQuery] string? transport = null)
+        [FromQuery] string? transport = null,
+        [FromQuery] string? authentication = null,
+        CancellationToken cancellationToken = default)
     {
         try
         {
@@ -259,7 +261,7 @@ public class ToolsController(IToolService toolService, IMapper mapper, IMcpServi
                 return BadRequest(new { error = "URL is required" });
             }
 
-            var response = await mcpService.DiscoverToolsAsync(url, transport);
+            var response = await mcpService.DiscoverToolsAsync(url, transport, authentication, cancellationToken);
             return Ok(response);
         }
         catch (Exception ex)
@@ -274,7 +276,9 @@ public class ToolsController(IToolService toolService, IMapper mapper, IMcpServi
     /// <param name="request">The MCP discovery request containing the server URL.</param>
     /// <returns>A list of Tool entities discovered from the MCP server.</returns>
     [HttpPost("discover-mcp-tools")]
-    public async Task<ActionResult<IEnumerable<ToolDto>>> DiscoverMcpToolsAsEntities([FromBody] McpDiscoveryRequest request)
+    public async Task<ActionResult<IEnumerable<ToolDto>>> DiscoverMcpToolsAsEntities(
+        [FromBody] McpDiscoveryRequest request,
+        CancellationToken cancellationToken)
     {
         try
         {
@@ -283,7 +287,11 @@ public class ToolsController(IToolService toolService, IMapper mapper, IMcpServi
                 return BadRequest(new { error = "URL is required" });
             }
 
-            var response = await mcpService.DiscoverToolsAsync(request.Url, request.Transport);
+            var response = await mcpService.DiscoverToolsAsync(
+                request.Url,
+                request.Transport,
+                request.Authentication,
+                cancellationToken);
             
             if (!response.Success)
             {

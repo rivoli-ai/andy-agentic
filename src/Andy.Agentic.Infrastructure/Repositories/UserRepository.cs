@@ -40,8 +40,9 @@ public class UserRepository : EfRepository<UserEntity>, IUserRepository
     /// <returns>The user entity or null if not found</returns>
     public async Task<UserEntity?> GetByEmailAsync(string email)
     {
+        var normalized = email.Trim().ToLowerInvariant();
         return await _context.Users
-            .FirstOrDefaultAsync(u => u.Email == email);
+            .FirstOrDefaultAsync(u => u.Email.ToLower() == normalized);
     }
 
     /// <summary>

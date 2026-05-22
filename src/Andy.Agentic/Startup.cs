@@ -15,12 +15,17 @@ using Andy.Agentic.Infrastructure.Semantic;
 using Andy.Agentic.Infrastructure.Semantic.Provider;
 using Andy.Agentic.Infrastructure.Services;
 using Andy.Agentic.Infrastructure.Services.ToolProviders;
+using Andy.Agentic.Infrastructure.DependencyInjection;
 using Andy.Agentic.Infrastructure.UnitOfWorks;
 using Andy.Agentic.Mcps;
 using Mapster;
+using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.IdentityModel.Tokens;
+using System.Text;
 using MapsterMapper;
 using Microsoft.EntityFrameworkCore;
 using Npgsql;
+using System.Security.Claims;
 
 namespace Andy.Agentic;
 
@@ -85,34 +90,34 @@ public class Startup(IConfiguration configuration)
     }
 
     /// <summary>
-    ///     Configures JWT Bearer authentication for Microsoft Graph tokens.
+    ///     Configures gateway JWT Bearer authentication (issued after OIDC token exchange).
     /// </summary>
     private void ConfigureAuthentication(IServiceCollection services)
     {
-        var tenantId = configuration["AzureAd:TenantId"];
-        var instance = configuration["AzureAd:Instance"];
-        if (string.IsNullOrWhiteSpace(tenantId) || string.IsNullOrWhiteSpace(instance))
-        {
-            throw new InvalidOperationException("AzureAd:TenantId and AzureAd:Instance must be set for JWT Bearer.");
-        }
+        services.AddAuthProviders(configuration);
 
-        var authorityBase = instance.TrimEnd('/');
-        var issuerV2 = $"{authorityBase}/{tenantId}/v2.0";
-        var issuerV1Login = $"{authorityBase}/{tenantId}/";
-        var issuerV1Sts = $"https://sts.windows.net/{tenantId}/";
+        var secretKey = configuration["JWT:SecretKey"] ?? "dev-secret-key-min-32-characters-long-for-security";
+        var issuer = configuration["JWT:Issuer"] ?? "AndyAgentic";
+        var audience = configuration["JWT:Audience"] ?? "AndyAgentic";
 
-        services.AddAuthentication("Bearer")
-            .AddJwtBearer("Bearer", options =>
+        services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
+            .AddJwtBearer(JwtBearerDefaults.AuthenticationScheme, options =>
             {
-                // Metadata / signing keys from v2 endpoint; accept v1 + v2 iss claims (avoids "issuer did not match").
-                options.Authority = issuerV2;
-                options.TokenValidationParameters = new Microsoft.IdentityModel.Tokens.TokenValidationParameters
+                // Keep JWT claim types as-is (sub, email, roles). Default inbound mapping
+                // rewrites them to WS-Federation URIs and breaks SyncUser / GetCurrentUser.
+                options.MapInboundClaims = false;
+
+                options.TokenValidationParameters = new TokenValidationParameters
                 {
-                    ValidateAudience = true,
-                    ValidAudiences = [$"{configuration["AzureAd:Audience"]}", $"{configuration["AzureAd:ClientId"]}"],
+                    ValidateIssuerSigningKey = true,
+                    IssuerSigningKey = new SymmetricSecurityKey(Encoding.ASCII.GetBytes(secretKey)),
                     ValidateIssuer = true,
-                    ValidIssuers = [issuerV2, issuerV1Login, issuerV1Sts],
-                    RoleClaimType = "http://schemas.microsoft.com/ws/2008/06/identity/claims/role"
+                    ValidIssuer = issuer,
+                    ValidateAudience = true,
+                    ValidAudience = audience,
+                    ValidateLifetime = true,
+                    ClockSkew = TimeSpan.FromMinutes(2),
+                    RoleClaimType = ClaimTypes.Role
                 };
             });
     }
@@ -130,7 +135,7 @@ public class Startup(IConfiguration configuration)
 
             options.AddPolicy("WriteRole", policy =>
             {
-                policy.RequireRole("Api.Write");
+                policy.RequireRole("Api.Write", "Write");
             });
         });
 
@@ -142,7 +147,11 @@ public class Startup(IConfiguration configuration)
         {
             options.AddPolicy("AllowAngularApp", policy =>
             {
-                policy.WithOrigins("http://localhost:4200", "http://localhost:4201")
+                policy.WithOrigins(
+                        "http://localhost:4200",
+                        "http://localhost:4201",
+                        "http://127.0.0.1:4200",
+                        "http://127.0.0.1:4201")
                     .AllowAnyHeader()
                     .AllowAnyMethod()
                     .AllowCredentials();

@@ -30,6 +30,9 @@ public class McpToolFactory : ToolFactory
         {
             var configuration = ParseConfiguration(tool.Configuration);
             var headers = ParseHeaders(tool.Headers);
+            var authHeaders = await ToolAuthHeaderBuilder.BuildHeadersAsync(tool.Authentication).ConfigureAwait(false);
+            foreach (var (key, value) in authHeaders)
+                headers[key] = value;
 
             var endpoint = GetRequiredConfigValue<string>(configuration, "endpoint");
             var mcpType = GetConfigValue(configuration, "mcpType", "auto");
@@ -101,7 +104,14 @@ public class McpToolFactory : ToolFactory
     {
         var transport = McpHttpTransportHelper.IsStdio(mcpType)
             ? CreateStdioTransport(endpoint, configuration, headers, workingDirectory)
-            : CreateHttpTransport(endpoint, configuration, headers, McpHttpTransportHelper.GetModeForExecution(mcpType));
+            : CreateHttpTransport(
+                endpoint,
+                configuration,
+                headers.ToDictionary(
+                    kvp => kvp.Key,
+                    kvp => kvp.Value?.ToString() ?? string.Empty,
+                    StringComparer.OrdinalIgnoreCase),
+                McpHttpTransportHelper.GetModeForExecution(mcpType, endpoint));
 
         return await McpClient.CreateAsync(transport, new McpClientOptions(), NullLoggerFactory.Instance, default)
             .ConfigureAwait(false);
@@ -163,25 +173,16 @@ public class McpToolFactory : ToolFactory
     private static IClientTransport CreateHttpTransport(
             string endpoint,
             Dictionary<string, object> configuration,
-            Dictionary<string, object> headers,
+            IReadOnlyDictionary<string, string> authHeaders,
             HttpTransportMode transportMode)
     {
-        var options = new HttpClientTransportOptions
-        {
-            Endpoint = new Uri(endpoint),
-            ConnectionTimeout = TimeSpan.FromSeconds(120L),
-            Name = GetConfigValue(configuration, "name", "MCP HTTP Client"),
-            AdditionalHeaders = headers.ToDictionary(kvp => kvp.Key, kvp => kvp.Value.ToString() ?? string.Empty),
-            TransportMode = transportMode
-        };
-
         var timeout = GetConfigValue<TimeSpan?>(configuration, "timeout", null);
-        if (timeout.HasValue)
-        {
-            options.ConnectionTimeout = timeout.Value;
-        }
-
-        return new HttpClientTransport(options, NullLoggerFactory.Instance);
+        return McpHttpTransportFactory.Create(
+            endpoint,
+            transportMode,
+            authHeaders,
+            GetConfigValue(configuration, "name", "MCP HTTP Client"),
+            timeout ?? TimeSpan.FromSeconds(120));
     }
 
     /// <summary>

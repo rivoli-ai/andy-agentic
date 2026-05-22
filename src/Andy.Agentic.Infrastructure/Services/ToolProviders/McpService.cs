@@ -23,12 +23,19 @@ public class McpService : IMcpService
     /// </summary>
     /// <param name="serverUrl">The URL of the MCP server.</param>
     /// <returns>A response containing the discovered tools or error information.</returns>
-    public async Task<McpToolDiscoveryResponse> DiscoverToolsAsync(string serverUrl, string? transport = null)
+    public async Task<McpToolDiscoveryResponse> DiscoverToolsAsync(
+        string serverUrl,
+        string? transport = null,
+        string? authentication = null,
+        CancellationToken cancellationToken = default)
     {
         try
         {
-            var mode = McpHttpTransportHelper.GetModeForDiscovery(transport);
-            var clientTransport = CreateHttpTransport(serverUrl, mode);
+            var mode = McpHttpTransportHelper.GetModeForDiscovery(transport, serverUrl);
+            var authHeaders = await ToolAuthHeaderBuilder
+                .BuildHeadersAsync(authentication, _httpClient, cancellationToken)
+                .ConfigureAwait(false);
+            var clientTransport = McpHttpTransportFactory.Create(serverUrl, mode, authHeaders, "MCP Discovery Client");
             await using var client = await McpClient
                 .CreateAsync(clientTransport, new McpClientOptions(), NullLoggerFactory.Instance, default)
                 .ConfigureAwait(false);
@@ -83,32 +90,14 @@ public class McpService : IMcpService
     /// <returns>A Tool entity representing the MCP tool.</returns>
     public Tool ConvertToTool(McpToolDiscovery mcpTool, string serverUrl, string? transport = null)
     {
-        var parameters = new List<object>();
-        var storedTransport = McpHttpTransportHelper.ToStorageTransport(transport);
-        
-        if (mcpTool.InputSchema?.Properties != null)
-        {
-            foreach (var (key, property) in mcpTool.InputSchema.Properties)
-            {
-                var parameter = new
-                {
-                    name = key,
-                    type = MapJsonTypeToParameterType(property.Type),
-                    required = mcpTool.InputSchema.Required?.Contains(key) ?? false,
-                    description = property.Description,
-                    @default = property.Default,
-                    @enum = property.Enum
-                };
-                parameters.Add(parameter);
-            }
-        }
+        var storedTransport = McpHttpTransportHelper.ToStorageTransport(transport, serverUrl);
 
         return new Tool
         {
             Id = Guid.NewGuid(),
             Name = mcpTool.Name,
             Description = mcpTool.Description,
-            Type = "McpTool",
+            Type = "mcp",
             Category = "MCP",
             IsActive = true,
             Configuration = JsonSerializer.Serialize(new { 
@@ -117,24 +106,56 @@ public class McpService : IMcpService
                 endpoint = serverUrl,
                 name = mcpTool.Name
             }),
-            Parameters = JsonSerializer.Serialize(parameters),
+            Parameters = BuildStoredParametersJson(mcpTool.InputSchema),
             CreatedAt = DateTime.UtcNow,
             UpdatedAt = DateTime.UtcNow,
             IsPublic = true
         };
     }
 
-    private static IClientTransport CreateHttpTransport(string endpoint, HttpTransportMode mode)
+    private static string BuildStoredParametersJson(McpToolInputSchema? inputSchema)
     {
-        var options = new HttpClientTransportOptions
+        if (inputSchema?.Properties is not { Count: > 0 })
         {
-            Endpoint = new Uri(endpoint),
-            ConnectionTimeout = TimeSpan.FromSeconds(120),
-            Name = "MCP Discovery Client",
-            TransportMode = mode
+            return "[]";
+        }
+
+        var properties = new Dictionary<string, object>();
+        foreach (var (key, property) in inputSchema.Properties)
+        {
+            var schemaProperty = new Dictionary<string, object>
+            {
+                ["type"] = MapJsonTypeToParameterType(property.Type),
+            };
+
+            if (!string.IsNullOrWhiteSpace(property.Description))
+            {
+                schemaProperty["description"] = property.Description;
+            }
+
+            if (property.Enum is { Count: > 0 })
+            {
+                schemaProperty["enum"] = property.Enum
+                    .Select(value => value?.ToString() ?? string.Empty)
+                    .Where(value => value.Length > 0)
+                    .ToArray();
+            }
+
+            properties[key] = schemaProperty;
+        }
+
+        var schema = new Dictionary<string, object>
+        {
+            ["type"] = "object",
+            ["properties"] = properties,
         };
 
-        return new HttpClientTransport(options, NullLoggerFactory.Instance);
+        if (inputSchema.Required is { Count: > 0 })
+        {
+            schema["required"] = inputSchema.Required;
+        }
+
+        return JsonSerializer.Serialize(schema);
     }
 
     /// <summary>
@@ -226,12 +247,30 @@ public class McpService : IMcpService
             property.Default = GetJsonValue(defaultElement);
         }
 
-        if (propertyElement.TryGetProperty("enum", out var enumElement) && enumElement.ValueKind == JsonValueKind.Array)
+        if (propertyElement.TryGetProperty("enum", out var enumElement))
         {
-            property.Enum = new List<object>();
-            foreach (var item in enumElement.EnumerateArray())
+            property.Enum = ParseEnumList(enumElement);
+        }
+        else if (propertyElement.TryGetProperty("const", out var constElement))
+        {
+            property.Enum = ParseEnumList(constElement);
+        }
+        else if (propertyElement.TryGetProperty("anyOf", out var anyOfForEnum)
+                 && anyOfForEnum.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var option in anyOfForEnum.EnumerateArray())
             {
-                property.Enum.Add(GetJsonValue(item));
+                if (option.TryGetProperty("enum", out var nestedEnum))
+                {
+                    property.Enum = ParseEnumList(nestedEnum);
+                    break;
+                }
+
+                if (option.TryGetProperty("const", out var nestedConst))
+                {
+                    property.Enum = ParseEnumList(nestedConst);
+                    break;
+                }
             }
         }
 
@@ -242,6 +281,15 @@ public class McpService : IMcpService
 
         return property;
     }
+
+    private static List<object>? ParseEnumList(JsonElement enumElement) =>
+        enumElement.ValueKind switch
+        {
+            JsonValueKind.Array => enumElement.EnumerateArray().Select(GetJsonValue).ToList(),
+            JsonValueKind.String or JsonValueKind.Number or JsonValueKind.True or JsonValueKind.False
+                => new List<object> { GetJsonValue(enumElement) },
+            _ => null,
+        };
 
     /// <summary>
     /// Extracts a value from a JSON element.

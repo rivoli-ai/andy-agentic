@@ -12,7 +12,11 @@ public interface IMcpService
     /// </summary>
     /// <param name="serverUrl">The URL of the MCP server.</param>
     /// <returns>A response containing the discovered tools or error information.</returns>
-    Task<McpToolDiscoveryResponse> DiscoverToolsAsync(string serverUrl, string? transport = null);
+    Task<McpToolDiscoveryResponse> DiscoverToolsAsync(
+        string serverUrl,
+        string? transport = null,
+        string? authentication = null,
+        CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Converts an MCP tool discovery to a Tool entity.

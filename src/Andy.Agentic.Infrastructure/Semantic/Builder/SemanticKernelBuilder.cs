@@ -1,3 +1,5 @@
+using System.Diagnostics.CodeAnalysis;
+using System.Runtime.CompilerServices;
 using Andy.Agentic.Domain.Interfaces.Llm.Semantic;
 using Andy.Agentic.Domain.Models;
 using Andy.Agentic.Domain.Models.Semantic;
@@ -7,8 +9,6 @@ using Microsoft.Extensions.Logging;
 using Microsoft.SemanticKernel;
 using Microsoft.SemanticKernel.Agents;
 using Microsoft.SemanticKernel.Connectors.OpenAI;
-using System.Diagnostics.CodeAnalysis;
-using System.Runtime.CompilerServices;
 using Agent = Andy.Agentic.Domain.Models.Agent;
 
 namespace Andy.Agentic.Infrastructure.Semantic.Builder;
@@ -89,30 +89,69 @@ public class SemanticKernelBuilder : ISemanticKernelBuilder
         }
         var hastTools = query.Agent?.Tools.Any() ?? false;
 
+        OpenAIPromptExecutionSettings? executionSettings = null;
+        if (hastTools)
+        {
+            executionSettings = new OpenAIPromptExecutionSettings
+            {
+                FunctionChoiceBehavior = FunctionChoiceBehavior.Auto(),
+            };
+        }
+
         ChatCompletionAgent agent =
             new()
             {
                 Name = "agent",
                 Kernel = query.Kernel,
-
-                Arguments = hastTools ? new KernelArguments(
-                    new OpenAIPromptExecutionSettings()
-                    {
-                        FunctionChoiceBehavior = FunctionChoiceBehavior.Auto(),
-                        ReasoningEffort = "high"
-                    }) : null,
+                Arguments = executionSettings != null ? new KernelArguments(executionSettings) : null,
                 UseImmutableKernel = hastTools
             };
 
-        var prompt = string.Join("\n", query.Agent?.Prompts.Select(p=>p.Content) ?? []);
+        var prompt = string.Join("\n", query.Agent?.Prompts.Select(p => p.Content) ?? []);
 
-        await foreach (var response in agent.InvokeStreamingAsync(prompt, thread))
+        _logger?.LogInformation(
+            "CallAgentAsync starting: agentId={AgentId}, sessionHistoryMessages={HistoryCount}, hasTools={HasTools}, promptChars={PromptLength}",
+            query.Agent?.Id,
+            query.ChatHistory.Count,
+            hastTools,
+            prompt.Length);
+
+        var chunkIndex = 0;
+        var yieldedCount = 0;
+        var skippedNullContent = 0;
+
+        await foreach (var response in agent.InvokeStreamingAsync(prompt, thread, cancellationToken: cancellationToken))
         {
-            if (response.Message.Content != null)
+            chunkIndex++;
+            var content = response.Message.Content;
+            if (content is not null)
             {
+                yieldedCount++;
+                if (yieldedCount == 1)
+                {
+                    _logger?.LogInformation(
+                        "CallAgentAsync first chunk at index {ChunkIndex}, contentLength={ContentLength}",
+                        chunkIndex,
+                        content.Length);
+                }
+
                 yield return response;
             }
+            else
+            {
+                skippedNullContent++;
+                _logger?.LogDebug(
+                    "CallAgentAsync chunk #{ChunkIndex} skipped (null Content), itemCount={ItemCount}",
+                    chunkIndex,
+                    response.Message.Items?.Count ?? 0);
+            }
         }
+
+        _logger?.LogInformation(
+            "CallAgentAsync completed: totalChunks={TotalChunks}, yielded={Yielded}, skippedNullContent={Skipped}",
+            chunkIndex,
+            yieldedCount,
+            skippedNullContent);
     }
 
     /// <summary>
@@ -132,7 +171,15 @@ public class SemanticKernelBuilder : ISemanticKernelBuilder
         LlmRequest request,
         ToolExecutionRecorder toolExecutionRecorder)
     {
-        _logger?.LogInformation("Building Semantic Kernel...");
+        _logger?.LogInformation(
+            "Building Semantic Kernel for agent {AgentId}: model={Model}, provider={Provider}, baseUrl={BaseUrl}, messageCount={MessageCount}, toolCount={ToolCount}, imageCount={ImageCount}",
+            agent.Id,
+            config.Model,
+            _providerDetector.DetectProvider(config),
+            config.BaseUrl,
+            request.Messages.Count,
+            request.Tools?.Count ?? 0,
+            request.Images?.Count ?? 0);
 
         var provider = _providerDetector.DetectProvider(config);
         var builder = Kernel.CreateBuilder();
@@ -156,9 +203,6 @@ public class SemanticKernelBuilder : ISemanticKernelBuilder
         }
 
         var chatHistory = new Microsoft.SemanticKernel.ChatCompletion.ChatHistory();
-
-        // Debug: Log images count
-        Console.WriteLine($"[SemanticKernelBuilder] Request.Images count: {request.Images?.Count ?? 0}");
 
         var lastUserMessage = request.Messages.LastOrDefault(m => m.Role == "user");
 
@@ -208,20 +252,39 @@ public class SemanticKernelBuilder : ISemanticKernelBuilder
                         }
                     }
 
-                    // Add user message with content items collection
-                    chatHistory.AddUserMessage(contentItems);
+                    if (contentItems.Count > 0)
+                    {
+                        chatHistory.AddUserMessage(contentItems);
+                    }
+                    else
+                    {
+                        _logger?.LogWarning("Skipping user message with no usable text or image content");
+                    }
                 }
-                else
+                else if (!string.IsNullOrWhiteSpace(message.Content))
                 {
                     chatHistory.AddUserMessage(message.Content);
                 }
+                else
+                {
+                    _logger?.LogWarning("Skipping empty user message when building Semantic Kernel chat history");
+                }
             }
-            else
+            else if (!string.IsNullOrWhiteSpace(message.Content))
             {
                 chatHistory.AddAssistantMessage(message.Content);
             }
+            else
+            {
+                _logger?.LogWarning("Skipping empty assistant message when building Semantic Kernel chat history");
+            }
         }
 
+
+        _logger?.LogInformation(
+            "Semantic Kernel built for agent {AgentId}: chatHistoryMessages={ChatHistoryCount}",
+            agent.Id,
+            chatHistory.Count);
 
         return new KernelResponse(kernel, chatHistory, agent);
     }

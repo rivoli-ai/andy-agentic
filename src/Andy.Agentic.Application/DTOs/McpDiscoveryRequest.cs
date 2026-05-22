@@ -17,4 +17,9 @@ public class McpDiscoveryRequest
     /// Optional: SSE, HTTP Streaming, streamable-http, auto — drives MCP HTTP transport for discovery and stored tool config.
     /// </summary>
     public string? Transport { get; set; }
+
+    /// <summary>
+    /// Optional authentication JSON (same shape as tool <c>authentication</c>) sent as MCP HTTP headers during discovery.
+    /// </summary>
+    public string? Authentication { get; set; }
 }

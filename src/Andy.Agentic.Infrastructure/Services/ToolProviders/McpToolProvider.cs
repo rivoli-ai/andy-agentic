@@ -1,3 +1,4 @@
+using Andy.Agentic.Domain.Helpers;
 using Andy.Agentic.Domain.Interfaces;
 using Andy.Agentic.Domain.Models;
 using Microsoft.Extensions.Logging;
@@ -9,9 +10,10 @@ using System.Text.Json;
 
 namespace Andy.Agentic.Infrastructure.Services.ToolProviders;
 
-public class McpToolProvider(ILogger<McpToolProvider> logger) : IToolProvider
+public class McpToolProvider(ILogger<McpToolProvider> logger, HttpClient httpClient) : IToolProvider
 {
     private readonly ILogger<McpToolProvider> _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+    private readonly HttpClient _httpClient = httpClient ?? throw new ArgumentNullException(nameof(httpClient));
 
     public string ToolType => "mcp";
 
@@ -49,19 +51,24 @@ public class McpToolProvider(ILogger<McpToolProvider> logger) : IToolProvider
     }
 
     public bool CanHandleToolType(string toolType) =>
-        string.Equals(toolType, ToolType, StringComparison.OrdinalIgnoreCase);
+        ToolTypeHelper.Matches(Domain.Models.Semantic.ToolType.McpTool, toolType);
 
     private async Task<McpClient> CreateMcpClientAsync(
         string endpoint,
         string mcpType,
         Dictionary<string, object> configuration,
-        Dictionary<string, object> auth)
+        Dictionary<string, object> auth,
+        CancellationToken cancellationToken = default)
     {
+        var authHeaders = await ToolAuthHeaderBuilder
+            .BuildHeadersAsync(auth, _httpClient, cancellationToken)
+            .ConfigureAwait(false);
+
         IClientTransport transport = McpHttpTransportHelper.IsStdio(mcpType)
             ? CreateStdioTransport(endpoint, configuration, auth)
-            : CreateHttpTransport(endpoint, configuration, auth, McpHttpTransportHelper.GetModeForExecution(mcpType));
+            : CreateHttpTransport(endpoint, configuration, authHeaders, McpHttpTransportHelper.GetModeForExecution(mcpType, endpoint));
 
-        return await McpClient.CreateAsync(transport, new McpClientOptions(), NullLoggerFactory.Instance, default);
+        return await McpClient.CreateAsync(transport, new McpClientOptions(), NullLoggerFactory.Instance, cancellationToken);
     }
 
     private IClientTransport CreateStdioTransport(
@@ -97,22 +104,16 @@ public class McpToolProvider(ILogger<McpToolProvider> logger) : IToolProvider
     private IClientTransport CreateHttpTransport(
         string endpoint,
         Dictionary<string, object> configuration,
-        Dictionary<string, object> headers,
+        IReadOnlyDictionary<string, string> authHeaders,
         HttpTransportMode transportMode)
     {
-        var options = new HttpClientTransportOptions
-        {
-            Endpoint = new Uri(endpoint),
-            Name = GetConfigValue(configuration, "name", "MCP HTTP Client"),
-            AdditionalHeaders = headers.ToDictionary(kvp => kvp.Key, kvp => kvp.Value?.ToString() ?? string.Empty),
-            TransportMode = transportMode
-        };
-
         var timeout = GetConfigValue<TimeSpan?>(configuration, "timeout", null);
-        if (timeout.HasValue)
-            options.ConnectionTimeout = timeout.Value;
-
-        return new HttpClientTransport(options, NullLoggerFactory.Instance);
+        return McpHttpTransportFactory.Create(
+            endpoint,
+            transportMode,
+            authHeaders,
+            GetConfigValue(configuration, "name", "MCP HTTP Client"),
+            timeout);
     }
 
 

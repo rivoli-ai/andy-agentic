@@ -1,5 +1,6 @@
 using System.Runtime.InteropServices.JavaScript;
 using System.Text.Json.Serialization;
+using Andy.Agentic.Domain.Helpers;
 
 namespace Andy.Agentic.Domain.Models;
 
@@ -98,6 +99,7 @@ public class FunctionProperty
     /// gets or sets the enumeration of possible values for the property, if applicable.
     /// </summary>
     [JsonPropertyName("enum")]
+    [JsonConverter(typeof(MoonshotEnumArrayJsonConverter))]
     public string[]? Enum { get; set; }
 
     /// <summary>

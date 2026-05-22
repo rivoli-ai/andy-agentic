@@ -1,429 +1,220 @@
-# Andy Agentic
+# Andy Agentic — Backend
 
-An agentic platform that enables seamless integration of any Large Language Model (LLM), API, and Model Context Protocol (MCP) server through an intuitive web interface.
+ASP.NET Core 9 Web API that powers the Andy Agentic platform. Provides
+agent/chat/tool/document/auth REST endpoints, an SSE chat stream, a SignalR
+hub for RAG progress, and an MCP server surface so external MCP clients can
+call our agents as tools.
 
-> ⚠️ **ALPHA RELEASE WARNING** ⚠️
-> 
-> This software is in ALPHA stage. **NO GUARANTEES** are made about its functionality, stability, or safety.
-> 
-> **CRITICAL WARNINGS:**
-> - This library performs **DESTRUCTIVE OPERATIONS** on files and directories
-> - Permission management is **NOT FULLY TESTED** and may have security vulnerabilities
-> - **DO NOT USE** in production environments
-> - **DO NOT USE** on systems with critical or irreplaceable data
-> - **DO NOT USE** on systems without complete, verified backups
-> - The authors assume **NO RESPONSIBILITY** for data loss, system damage, or security breaches
-> 
-> **USE AT YOUR OWN RISK**
+> See `../ARCHITECTURE.md` for the system-level picture and
+> `../IMPROVEMENT_PLAN.md` for the active roadmap. This README focuses on the
+> Backend project specifically.
 
-## Overview
+## Tech stack
 
-Andy Agentic provides a unified web-based interface for orchestrating AI agents across different LLM providers, APIs, and MCP servers. It acts as a bridge between various AI services and tools, allowing you to create powerful agentic workflows without being locked into a single provider or protocol.
+- **.NET 9** (target framework `net9.0` in every `.csproj`)
+- **ASP.NET Core** Web API + SignalR
+- **EF Core 9** + **Npgsql** + **pgvector** (Microsoft.SemanticKernel.Connectors.PgVector)
+- **Microsoft Semantic Kernel 1.74** for embeddings & prompt orchestration
+- **ModelContextProtocol 1.2** — both as a server (we expose `/` and `/sse`)
+  and as a client (calling user-configured external MCP servers)
+- **OpenAI SDK 2.10**, plus an Ollama HTTP client
+- **Mapster** (not AutoMapper) via `Mapster.DependencyInjection`
+- **Swashbuckle** for Swagger UI / OpenAPI
+- **Microsoft.Identity.Web** + `JwtBearer` for Microsoft Entra authentication
+- **PdfPig**, **DocumentFormat.OpenXml**, **ClosedXML**, **QuestPDF** for
+  document parse/export
 
-## Key Features
+## Solution layout (Clean Architecture)
 
-- **Universal LLM Support**: Connect to any LLM provider (OpenAI, Anthropic, Google, local models, etc.)
-- **API Integration**: Seamlessly integrate with any REST or GraphQL API
-- **MCP Server Compatibility**: Full support for Model Context Protocol servers
-- **Web-Based Interface**: Modern, responsive UI for configuring and managing agents
-- **Agent Orchestration**: Create complex multi-agent workflows
-- **Real-time Monitoring**: Track agent activities and performance
-- **Microsoft Entra Authentication**: Secure authentication with Azure AD integration
-- **User Management**: Multi-user support with user-specific data isolation
-- **Extensible Architecture**: Plugin system for custom integrations
-- **Streaming Chat**: Real-time streaming responses with OpenAI-compatible format
-- **Tool Execution**: Dynamic tool calling and execution framework
-- **Session Management**: Persistent chat sessions with history tracking
-- **Tag System**: Organize and categorize agents with flexible tagging
+```
+Andy.Agentic.Domain         entities, models, repository/service interfaces
+Andy.Agentic.Application    DTOs, use-case services (Agent/Chat/Tool/Doc/Auth)
+Andy.Agentic.Infrastructure EF repos, migrations, LLM adapters, RAG, MCP transport
+Andy.Agentic                ASP.NET host (Controllers, Mcps/, Program, Startup)
+```
 
-## Technology Stack
-
-- **Backend**: ASP.NET Core 9.0 Web API
-- **Database**: MySQL with Entity Framework Core
-- **Architecture**: Clean Architecture with Domain-Driven Design
-- **Mapping**: AutoMapper for object-to-object mapping
-- **Testing**: xUnit with code coverage
-- **Platform**: Cross-platform (.NET 9)
-- **Containerization**: Docker & Docker Compose
-- **LLM Integration**: OpenAI API, Ollama local models
-- **Real-time**: Server-Sent Events (SSE) for streaming
+References go strictly inward. Domain has zero project references.
 
 ## Prerequisites
 
-### Option 1: Docker (Recommended)
-- Docker Desktop or Docker Engine
-- Docker Compose
+- .NET 9 SDK
+- PostgreSQL 16 with the **pgvector** extension (or Docker — see below)
+- An Azure AD tenant + app registrations (see `AUTHENTICATION_SETUP.md`)
+- Node 20+ if you also want to run the Angular frontend in `../FrontEnd/`
 
-### Option 2: Local Development
-- .NET 9.0 SDK or later
-- MySQL Server 8.0 or later
-- Node.js 18+ and npm (for frontend)
-- Azure AD tenant (for authentication)
-- A modern web browser
+## Run it
 
-## Getting Started
-
-### Option 1: Docker (Recommended)
-
-The easiest way to run Andy Agentic is using Docker Compose, which will set up both the application and MySQL database automatically.
+### Option A — Docker Compose (recommended)
 
 ```bash
-# Clone the repository
-git clone https://github.com/rivoli-ai/andy-agentic.git
-cd andy-agentic
-
-# Start the application with Docker Compose (builds automatically)
-docker-compose up -d
-
-# View logs
-docker-compose logs -f app
-
-# Stop the application
-docker-compose down
+cd Backend
+docker-compose up -d        # brings up pgvector + the backend
+docker-compose logs -f agentic-backend
 ```
 
-The application will be available at:
-- **HTTP**: `http://localhost`
-- **HTTPS**: `https://localhost` (if SSL is configured)
-- **API Documentation**: `http://localhost/swagger`
+Defaults from `.env` / `docker-compose.yml`:
 
-### Authentication Setup
+- Postgres on host port `5432`
+- Backend on host port `5000` → container port `80`
+- Swagger UI: <http://localhost:5000/swagger>
+- Health: <http://localhost:5000/api/health>
 
-Andy Agentic now includes Microsoft Entra (Azure AD) authentication. Before running the application, you need to configure authentication:
+> Heads-up: the current healthcheck in `docker-compose.yml` probes `/health`
+> rather than `/api/health`. This is tracked in `IMPROVEMENT_PLAN.md` §0.3.
 
-1. **Set up Azure AD App Registrations** (see [AUTHENTICATION_SETUP.md](AUTHENTICATION_SETUP.md))
-2. **Configure environment variables** with your Azure AD credentials
-3. **Run database migrations** to add user tables
-
-For detailed setup instructions, see [AUTHENTICATION_SETUP.md](AUTHENTICATION_SETUP.md).
-
-#### Docker Commands
+### Option B — Local dev
 
 ```bash
-# Start services in background
-docker-compose up -d
-
-# View logs
-docker-compose logs -f
-
-# Stop services
-docker-compose down
-
-# Stop and remove volumes (WARNING: This will delete all data)
-docker-compose down -v
-
-# Rebuild and restart services
-docker-compose up --build --force-recreate -d
-
-# Build only (without starting)
-docker-compose build
-
-# View running containers
-docker-compose ps
-```
-
-### Option 2: Local Development
-
-#### Database Setup
-
-1. **Install MySQL Server** (8.0 or later)
-2. **Create a database** for the application:
-   ```sql
-   CREATE DATABASE andy_agentic;
-   ```
-3. **Update connection string** in `appsettings.json`:
-   ```json
-   {
-     "ConnectionStrings": {
-       "DefaultConnection": "Server=localhost;Database=andy_agentic;Uid=your_username;Pwd=your_password;"
-     }
-   }
-   ```
-
-#### Running the Application
-
-```bash
-# Clone the repository
-git clone https://github.com/rivoli-ai/andy-agentic.git
-cd andy-agentic
-
-# Restore dependencies
+cd Backend
 dotnet restore
-
-# Build the solution
-dotnet build
-
-# Run the application
+dotnet ef database update --project src/Andy.Agentic.Infrastructure
 dotnet run --project src/Andy.Agentic
 ```
 
-The application will start on `http://localhost:80` (HTTP) and `https://localhost:443` (HTTPS). Navigate to this URL in your browser to access the web interface.
+By default the host listens on ports 80 and 443 (see `Program.cs`). On macOS
+you'll likely want to set `ASPNETCORE_URLS=http://localhost:5000` to avoid
+the privileged-port issue:
+
+```bash
+ASPNETCORE_URLS=http://localhost:5000 dotnet run --project src/Andy.Agentic
+```
 
 ### Configuration
 
-The application uses a clean architecture with organized configuration in `Startup.cs`:
+`appsettings.json` and `appsettings.Development.json` hold defaults; secrets
+and per-environment overrides go in environment variables
+(`__` is the .NET section separator):
 
-- **Web Services**: Controllers, Swagger, CORS
-- **Database**: Entity Framework Core with MySQL
-- **AutoMapper**: Object-to-object mapping
-- **Repositories**: Data access layer
-- **Services**: Business logic layer
-- **HTTP Clients**: External API integration
+| Env var                                            | Notes                          |
+|----------------------------------------------------|--------------------------------|
+| `ConnectionStrings__DefaultConnection`             | Npgsql connection string       |
+| `AzureAd__TenantId` / `__ClientId` / `__Audience`  | JWT bearer validation          |
+| `ASPNETCORE_ENVIRONMENT`                           | `Development` / `Production`   |
 
-### Running Tests
+The bundled defaults use `agentic_user` / `agentic_password` — fine for
+local, **must be overridden in production**. See `POSTGRES_SETUP.md`.
+
+## Authentication
+
+Microsoft Entra (Azure AD) via JWT Bearer. The `AuthController`:
+
+- `GET  /api/auth/me` — returns the current user, looked up by `oid` claim.
+- `POST /api/auth/sync` — upserts a `UserEntity` from the JWT claims; called
+  by the SPA on first login.
+
+Two authorization policies are registered in `Startup.ConfigureAuthorization`:
+
+- `ReadScope` — requires the `Api.Access` scope claim.
+- `WriteRole` — requires the `Api.Write` role.
+
+Full step-by-step setup (Azure portal app registrations, expose-an-API,
+scopes, redirect URIs) is in `AUTHENTICATION_SETUP.md`.
+
+## Key endpoints
+
+The full surface is in Swagger; high-traffic ones:
+
+| Method   | Route                              | Purpose                                  |
+|----------|------------------------------------|------------------------------------------|
+| `POST`   | `/api/chat/stream`                 | SSE: send message, stream tokens + tool calls |
+| `GET`    | `/api/chat/sessions`               | List chat sessions for the current user  |
+| `GET`    | `/api/chat/history/{agentId}`      | Get chat history for an agent            |
+| `GET\|POST\|PUT\|DELETE` | `/api/agents[/{id}]`  | Manage agents                            |
+| `GET\|POST\|PUT\|DELETE` | `/api/tools[/{id}]`   | Manage tools (REST + MCP definitions)    |
+| `POST`   | `/api/tools/{id}/execute`          | Execute a tool out-of-band               |
+| `GET\|POST\|PUT\|DELETE` | `/api/llm[/{id}]`     | Manage LLM provider configurations       |
+| `POST`   | `/api/llm/test-connection`         | Validate an LLM config before saving     |
+| `POST`   | `/api/documents`                   | Upload a document (kicks off RAG ingest) |
+| `POST`   | `/api/exports/{type}`              | Export chat/document to PDF/DOCX/XLSX    |
+| `GET`    | `/api/health` / `/api/health/detailed` | Liveness / detailed info             |
+| `*`      | `/` and `/sse`                     | MCP server (Streamable HTTP + legacy SSE)|
+| `*`      | `/documentRagHub`                  | SignalR hub for RAG progress             |
+
+## Tests + coverage
 
 ```bash
-# Run all tests
-dotnet test
-
-# Run with coverage
-dotnet test --collect:"XPlat Code Coverage"
+dotnet test                                                                 # all
+dotnet test --collect:"XPlat Code Coverage" --results-directory ./TestResults
+reportgenerator -reports:"./TestResults/*/coverage.cobertura.xml" \
+  -targetdir:"./TestResults/CoverageReport" -reporttypes:Html
 ```
 
-## Project Structure
+Tests live under `tests/`:
 
 ```
-andy-agentic/
+tests/Andy.Agentic.Tests/                ← controller-level
+tests/Andy.Agentic.Application.Tests/    ← service-level
+tests/Andy.Agentic.Domain.Tests/         ← pure domain
+tests/Andy.Agentic.Infrastructure.Tests/ ← repos, tool factories
+```
+
+Coverage is currently low (especially around `ChatService` and
+`ToolExecutionService`) — see `../IMPROVEMENT_PLAN.md` §3.3.
+
+## Project structure
+
+```
+Backend/
+├── Andy.Agentic.sln
+├── Directory.Build.props
+├── global.json
+├── Dockerfile
+├── docker-compose.yml
+├── postgres/init/                       pgvector init scripts
+├── docs/
+│   └── CLEAN_ARCHITECTURE.md
 ├── src/
-│   ├── Andy.Agentic/                    # Main ASP.NET Core application
-│   │   ├── Controllers/                 # API controllers
-│   │   │   ├── AgentsController.cs      # Agent management
-│   │   │   ├── ChatController.cs        # Chat and streaming
-│   │   │   ├── LLMController.cs         # LLM provider management
-│   │   │   ├── TagsController.cs        # Tag management
-│   │   │   ├── ToolsController.cs       # Tool management
-│   │   │   └── ToolExecutionController.cs # Tool execution
-│   │   ├── Program.cs                   # Application entry point
-│   │   ├── Startup.cs                   # Configuration and DI setup
-│   │   ├── appsettings.json             # Application configuration
-│   │   └── appsettings.Docker.json      # Docker-specific configuration
-│   ├── Andy.Agentic.Application/        # Application layer
-│   │   ├── DTOs/                        # Data Transfer Objects
-│   │   ├── Interfaces/                  # Service interfaces
-│   │   ├── Mapping/                     # AutoMapper profiles
-│   │   └── Services/                    # Business logic services
-│   ├── Andy.Agentic.Domain/             # Domain layer
-│   │   ├── Entities/                    # Domain entities
-│   │   ├── Interfaces/                  # Repository interfaces
-│   │   ├── Models/                      # Domain models
-│   │   └── ValueObjects/                # Domain value objects
-│   └── Andy.Agentic.Infrastructure/     # Infrastructure layer
-│       ├── Data/                        # Database context
-│       ├── Repositories/                # Repository implementations
-│       └── Services/                    # Infrastructure services
-├── tests/                               # Test projects
-│   ├── Andy.Agentic.Tests/              # Main test project
-│   ├── Andy.Agentic.Application.Tests/  # Application layer tests
-│   ├── Andy.Agentic.Domain.Tests/       # Domain layer tests
-│   └── Andy.Agentic.Infrastructure.Tests/ # Infrastructure tests
-├── docs/                                # Documentation
-├── examples/                            # Example configurations
-├── Dockerfile                           # Docker container definition
-├── docker-compose.yml                   # Docker Compose configuration
-├── .dockerignore                        # Docker build context exclusions
-└── shop_schema.sql                      # Database schema
+│   ├── Andy.Agentic/                    web host
+│   │   ├── Controllers/                 (10 controllers)
+│   │   ├── Mcps/AgentMcp.cs             MCP tools we expose
+│   │   ├── Program.cs / Startup.cs
+│   │   └── appsettings*.json
+│   ├── Andy.Agentic.Application/
+│   │   ├── DTOs/                        (request/response shapes)
+│   │   ├── Services/                    Agent/Chat/Tool/Doc/Auth/LLM
+│   │   ├── Interfaces/
+│   │   └── Mapping/                     Mapster register
+│   ├── Andy.Agentic.Domain/
+│   │   ├── Entities/                    EF-mapped types
+│   │   ├── Models/                      domain models (incl. Semantic/*)
+│   │   ├── Queries/                     SearchCriteria + Pagination
+│   │   └── Interfaces/
+│   └── Andy.Agentic.Infrastructure/
+│       ├── Data/                        AndyDbContext
+│       ├── Migrations/                  EF Core migrations
+│       ├── Mapping/                     entity ↔ domain Mapster registers
+│       ├── Repositories/
+│       │   ├── Database/                EF repos + DataSeeder
+│       │   └── Llm/                     OpenAI + Ollama adapters
+│       ├── Semantic/                    SK builder, RAG provider, hub, hosted service
+│       │   ├── Builder/
+│       │   ├── Interceptor/
+│       │   ├── Provider/
+│       │   └── Tools/                   API / MCP / Native tool factories
+│       ├── Services/
+│       │   ├── DatabaseService.cs
+│       │   └── ToolProviders/           ApiToolProvider, McpToolProvider, McpService
+│       └── UnitOfWorks/
+└── tests/
 ```
 
-## Docker Configuration
+## Conventions
 
-### Docker Services
-
-The `docker-compose.yml` file defines two main services:
-
-#### MySQL Database (`mysql`)
-- **Image**: `mysql:8.0`
-- **Port**: `3306` (mapped to host)
-- **Database**: `andy_agentic`
-- **Credentials**: 
-  - Root: `root` / `rootpassword`
-  - User: `andy_user` / `andy_password`
-- **Data Persistence**: Named volume `mysql_data`
-- **Health Check**: Automatic MySQL connectivity verification
-
-#### Andy Agentic Application (`app`)
-- **Build**: Multi-stage Docker build from source
-- **Ports**: `80` (HTTP) and `443` (HTTPS)
-- **Environment**: Production mode
-- **Dependencies**: Waits for MySQL to be healthy
-- **Logs**: Persistent volume `app_logs`
-
-### Docker Environment Variables
-
-The application uses the following environment variables in Docker:
-
-```bash
-ASPNETCORE_ENVIRONMENT=Production
-ASPNETCORE_URLS=http://+:80
-ConnectionStrings__DefaultConnection=Server=mysql;Database=andy_agentic;User=andy_user;Password=andy_password;Port=3306
-```
-
-### Docker Volumes
-
-- **`mysql_data`**: Persistent MySQL database storage
-- **`app_logs`**: Application log files
-
-### Docker Network
-
-All services run on the `andy-agentic-network` bridge network for secure internal communication.
-
-### Troubleshooting Docker Issues
-
-#### Build Issues
-If you encounter build errors, try these steps:
-
-```bash
-# Clean build (removes cached layers)
-docker-compose build --no-cache
-
-# Force rebuild and restart
-docker-compose up --build --force-recreate -d
-
-# Check build logs
-docker-compose logs app
-```
-
-#### Docker Desktop Not Running
-If you get connection errors, ensure Docker Desktop is running:
-
-```bash
-# Check Docker status
-docker version
-
-# Start Docker Desktop if needed (Windows/Mac)
-# Or restart Docker service (Linux)
-sudo systemctl restart docker
-```
-
-#### Port Already in Use
-If ports 80 or 3306 are already in use:
-
-```bash
-# Check what's using the ports
-netstat -tulpn | grep :80
-netstat -tulpn | grep :3306
-
-# Stop conflicting services or modify docker-compose.yml ports
-```
-
-## API Documentation
-
-When running in development mode, Swagger documentation is available at:
-- `http://localhost/swagger` (HTTP)
-- `https://localhost/swagger` (HTTPS)
-
-### Available Endpoints
-
-#### Agents
-- `GET /api/agents` - List all agents
-- `GET /api/agents/{id}` - Get agent by ID
-- `POST /api/agents` - Create new agent
-- `PUT /api/agents/{id}` - Update agent
-- `DELETE /api/agents/{id}` - Delete agent
-
-#### Chat
-- `POST /api/chat/stream` - Stream chat messages (SSE)
-- `GET /api/chat/history/{agentId}` - Get chat history
-- `GET /api/chat/sessions` - List chat sessions
-- `POST /api/chat/sessions` - Create new session
-
-#### Tags
-- `GET /api/tags` - List all tags
-- `POST /api/tags` - Create new tag
-- `PUT /api/tags/{id}` - Update tag
-- `DELETE /api/tags/{id}` - Delete tag
-- `GET /api/tags/search` - Search tags
-
-#### Tools
-- `GET /api/tools` - List all tools
-- `POST /api/tools` - Create new tool
-- `POST /api/tools/execute` - Execute tool
-
-#### LLM Providers
-- `GET /api/llm/providers` - List available providers
-- `POST /api/llm/test-connection` - Test LLM connection
-
-## Contributing
-
-Please see [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines on how to contribute to this project.
-
-## Security Considerations
-
-This is an alpha release intended for development and testing purposes only. The application:
-- May have unpatched security vulnerabilities
-- Should not be exposed to public networks
-- Should not be used with sensitive data
-- Requires careful permission configuration
-
-Always run in isolated environments with appropriate security measures.
+- Public APIs use DTOs from `Andy.Agentic.Application/DTOs/`. Entities stay
+  in `Andy.Agentic.Domain/Entities/` and are not serialised to clients.
+- Mapping is **Mapster**, registered in `Application/Mapping/` and
+  `Infrastructure/Mapping/`. Add new maps there, not inline.
+- New repositories implement the relevant interface in
+  `Andy.Agentic.Domain/Interfaces/Database/` and register in
+  `Startup.ConfigureDatabaseRepositories`.
+- New LLM providers implement `ILLmProviderRepository` and register in
+  `Startup.ConfigureLlmRepositories`; the factory resolves by
+  `LLMProviderType`.
+- New tool sources implement `IToolProvider`; register in
+  `Startup.ConfigureToolProviders`.
+- Use `ILogger<T>` — do not add new `Console.WriteLine` calls. Existing ones
+  are tracked for removal in `../IMPROVEMENT_PLAN.md` §2.2.
 
 ## License
 
-This project is licensed under the Apache License, Version 2.0. See the [LICENSE](LICENSE) file for details.
-
-## Support
-
-This is an alpha release. Community support is available through:
-- GitHub Issues for bug reports and feature requests
-- Discussions for general questions and ideas
-
-## Architecture
-
-Andy Agentic follows **Clean Architecture** principles with clear separation of concerns:
-
-### Domain Layer (`Andy.Agentic.Domain`)
-- **Entities**: Core business objects (Agent, Tool, Tag, etc.)
-- **Interfaces**: Repository and service contracts
-- **Models**: Domain models for business logic
-- **Value Objects**: Immutable objects representing domain concepts
-
-### Application Layer (`Andy.Agentic.Application`)
-- **DTOs**: Data Transfer Objects for API communication
-- **Services**: Business logic and orchestration
-- **Interfaces**: Service contracts
-- **Mapping**: AutoMapper profiles for object mapping
-
-### Infrastructure Layer (`Andy.Agentic.Infrastructure`)
-- **Data**: Entity Framework Core database context
-- **Repositories**: Data access implementations
-- **Services**: External service integrations (LLM providers, APIs)
-
-### Presentation Layer (`Andy.Agentic`)
-- **Controllers**: REST API endpoints
-- **Startup**: Dependency injection and configuration
-- **Program**: Application entry point
-
-## Features Implemented
-
-### ✅ Core Features
-- [x] **Agent Management**: Create, read, update, delete agents
-- [x] **LLM Integration**: OpenAI and Ollama provider support
-- [x] **Tool System**: Dynamic tool creation and execution
-- [x] **Chat System**: Real-time streaming with SSE
-- [x] **Session Management**: Persistent chat sessions
-- [x] **Tag System**: Organize agents with tags
-- [x] **MCP Server Support**: Model Context Protocol integration
-- [x] **Clean Architecture**: Domain-driven design implementation
-- [x] **AutoMapper**: Object-to-object mapping
-- [x] **Repository Pattern**: Data access abstraction
-- [x] **Unit of Work**: Transaction management
-- [x] **Comprehensive Testing**: xUnit test framework
-
-### 🔄 In Progress
-- [ ] **Authentication & Authorization**: User management and security
-- [ ] **Web UI**: Frontend interface implementation
-- [ ] **Performance Monitoring**: Metrics and analytics
-- [ ] **Plugin System**: Extensible architecture
-
-### 📋 Roadmap
-- [ ] **Agent Workflow Designer**: Visual workflow creation
-- [ ] **Multi-Agent Orchestration**: Complex agent interactions
-- [ ] **Plugin Marketplace**: Third-party integrations
-- [ ] **Advanced Analytics**: Usage patterns and insights
-- [ ] **API Rate Limiting**: Request throttling and management
-- [ ] **Caching Layer**: Performance optimization
-- [ ] **Message Queuing**: Asynchronous processing
-- [ ] **Webhook Support**: Event-driven integrations
-
-## Disclaimer
-
-This software is provided "as is" without warranty of any kind. Use at your own risk. The authors are not responsible for any damages or losses arising from its use.
+Apache License 2.0 — see `LICENSE`.

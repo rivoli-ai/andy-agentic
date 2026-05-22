@@ -1,14 +1,16 @@
+using System.Runtime.CompilerServices;
 using System.Text;
 using System.Text.Json;
 using Andy.Agentic.Application.Interfaces;
 using Andy.Agentic.Domain.Entities;
+using Andy.Agentic.Domain.Helpers;
 using Andy.Agentic.Domain.Interfaces;
 using Andy.Agentic.Domain.Interfaces.Database;
 using Andy.Agentic.Domain.Interfaces.Llm;
 using Andy.Agentic.Domain.Interfaces.Llm.Semantic;
 using Andy.Agentic.Domain.Models;
 using MapsterMapper;
-using System.Runtime.CompilerServices;
+using Microsoft.Extensions.Logging;
 
 namespace Andy.Agentic.Application.Services;
 
@@ -16,7 +18,13 @@ namespace Andy.Agentic.Application.Services;
 ///     Service for managing Large Language Model (LLM) configurations, providers, and interactions.
 ///     Handles CRUD operations for LLM configs, provider information, and message processing.
 /// </summary>
-public class LlmService(ILlmRepository llmRepository, ILlmProviderFactory providerFactory, IMapper mapper, ISemanticKernelBuilder semenSemanticKernelBuilder) : ILlmService
+public class LlmService(
+    ILlmRepository llmRepository,
+    ILlmProviderFactory providerFactory,
+    IMapper mapper,
+    ISemanticKernelBuilder semenSemanticKernelBuilder,
+    IToolExecutionService toolExecutionService,
+    ILogger<LlmService> logger) : ILlmService
 {
     /// <summary>
     ///     Retrieves all LLM configurations from the repository.
@@ -204,45 +212,63 @@ public class LlmService(ILlmRepository llmRepository, ILlmProviderFactory provid
         
         var tools = agent.Tools.Select(at => at.Tool).ToList();
 
-        Console.WriteLine($"Session ID: {sessionId}");
-        Console.WriteLine($"Chat History Count: {recentMessages.Count}");
-        Console.WriteLine($"Total Tools Available: {allTools.Count}");
-        Console.WriteLine($"Tools After Filtering: {tools.Count}");
-        Console.WriteLine($"Images Count: {images?.Count ?? 0}");
+        logger.LogInformation(
+            "PrepareLlmMessage: sessionId={SessionId}, historyCount={HistoryCount}, allTools={AllToolsCount}, agentTools={AgentToolsCount}, images={ImageCount}",
+            sessionId,
+            recentMessages.Count,
+            allTools.Count,
+            tools.Count,
+            images?.Count ?? 0);
 
-        // Create a user message with images if provided
-        var messages = new List<ChatHistory>(recentMessages);
-        
-        // If we have images for the current message, add it to the messages list
-        // The images will be handled in Semantic Kernel builder
+        // Exclude empty assistant/user text from history — Kimi and other providers reject them (HTTP 400).
+        var messages = recentMessages
+            .Where(m =>
+                (m.Role == "user" && (!string.IsNullOrWhiteSpace(m.Content) || m.Images?.Any() == true))
+                || (m.Role == "assistant" && !string.IsNullOrWhiteSpace(m.Content)))
+            .ToList();
+
+        var skippedEmpty = recentMessages.Count - messages.Count;
+        if (skippedEmpty > 0)
+        {
+            logger.LogWarning(
+                "PrepareLlmMessage: skipped {SkippedCount} empty history message(s) for sessionId={SessionId}",
+                skippedEmpty,
+                sessionId);
+        }
+
+        // User message was already persisted before streaming; avoid duplicating it in the LLM payload.
+        var lastHistory = messages.LastOrDefault();
+        var userAlreadyInHistory = lastHistory?.Role == "user"
+            && string.Equals(lastHistory.Content, userMessage, StringComparison.Ordinal)
+            && (images == null || !images.Any());
+
         if (images != null && images.Any())
         {
-            var userContent = new ChatHistory
+            if (!userAlreadyInHistory)
             {
-                Content = userMessage,
-                Role = "user",
-                AgentId = agent.Id,
-                SessionId = sessionId,
-                Timestamp = DateTime.UtcNow,
-                Images = images // Include images in the message
-            };
-            messages.Add(userContent);
+                messages.Add(new ChatHistory
+                {
+                    Content = userMessage,
+                    Role = "user",
+                    AgentId = agent.Id,
+                    SessionId = sessionId,
+                    Timestamp = DateTime.UtcNow,
+                    Images = images
+                });
+            }
         }
-        else if (!string.IsNullOrEmpty(userMessage))
+        else if (!string.IsNullOrEmpty(userMessage) && !userAlreadyInHistory)
         {
-            // Add user message even without images to maintain conversation flow
-            var userContent = new ChatHistory
+            messages.Add(new ChatHistory
             {
                 Content = userMessage,
                 Role = "user",
                 AgentId = agent.Id,
                 SessionId = sessionId,
                 Timestamp = DateTime.UtcNow
-            };
-            messages.Add(userContent);
+            });
         }
 
-        // Note: Images from history are already in the messages, and current images are in the request
         return new LlmRequest { Messages = messages, Tools = tools!, Images = images };
     }
 
@@ -260,37 +286,130 @@ public class LlmService(ILlmRepository llmRepository, ILlmProviderFactory provid
         ToolExecutionRecorder toolExecutionRecorder,
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
+        logger.LogInformation(
+            "SendToLlmProviderStream starting: agentId={AgentId}, sessionId={SessionId}, model={Model}, baseUrl={BaseUrl}, temperature={Temperature}, topP={TopP}",
+            agent.Id,
+            session,
+            agent.LlmConfig.Model,
+            agent.LlmConfig.BaseUrl,
+            agent.LlmConfig.Temperature,
+            agent.LlmConfig.TopP);
+
+        var chunkCount = 0;
+        var contentChunkCount = 0;
+        var thinkingChunkCount = 0;
+
+        if (ThinkingModelSupport.ShouldUseRawReasoningStream(agent.LlmConfig, request))
+        {
+            logger.LogInformation(
+                "Using raw HTTP streaming for thinking model {Model} (sessionId={SessionId}, tools={ToolCount})",
+                agent.LlmConfig.Model,
+                session,
+                request.Tools?.Count ?? 0);
+
+            var provider = ResolveOpenAiCompatibleRepository(agent.LlmConfig);
+            var openAiTools = BuilolsFromAgent(agent);
+
+            await foreach (var chunk in provider.StreamThinkingChatAsync(
+                               agent.LlmConfig,
+                               request.Messages,
+                               openAiTools.Count > 0 ? openAiTools : null,
+                               async (toolCalls, ct) =>
+                               {
+                                   var logs = await toolExecutionService.ExecuteToolCallsAsync(
+                                       toolCalls.ToList(),
+                                       agent,
+                                       session);
+                                   foreach (var log in logs)
+                                   {
+                                       toolExecutionRecorder.Add(log);
+                                   }
+
+                                   return logs;
+                               },
+                               cancellationToken))
+            {
+                chunkCount++;
+                if (!string.IsNullOrEmpty(chunk.Thinking))
+                {
+                    thinkingChunkCount++;
+                }
+
+                if (!string.IsNullOrEmpty(chunk.Content))
+                {
+                    contentChunkCount++;
+                    if (contentChunkCount == 1)
+                    {
+                        logger.LogInformation(
+                            "SendToLlmProviderStream first content chunk #{ChunkIndex}, length={Length}",
+                            chunkCount,
+                            chunk.Content.Length);
+                    }
+                }
+
+                if (!string.IsNullOrEmpty(chunk.Thinking) || !string.IsNullOrEmpty(chunk.Content))
+                {
+                    yield return chunk;
+                }
+            }
+
+            logger.LogInformation(
+                "SendToLlmProviderStream completed (raw reasoning): sessionId={SessionId}, totalChunks={TotalChunks}, contentChunks={ContentChunks}, thinkingChunks={ThinkingChunks}",
+                session,
+                chunkCount,
+                contentChunkCount,
+                thinkingChunkCount);
+            yield break;
+        }
+
         var kernel = semenSemanticKernelBuilder.BuildKernelAsync(agent, session, agent.LlmConfig, request, toolExecutionRecorder);
-        var thinkingBuffer = new List<string>();
         var isThinking = false;
-        
+
         await foreach (var chunk in semenSemanticKernelBuilder.CallAgentAsync(kernel, cancellationToken))
         {
+            chunkCount++;
             var content = chunk.Content ?? string.Empty;
-            
-            // Simple heuristic to detect thinking patterns
-            // Look for common thinking indicators
+
             if (content.Contains("<think>") || content.Contains("<|begin_of_box|>"))
             {
                 isThinking = true;
+                logger.LogDebug("SendToLlmProviderStream chunk #{ChunkIndex}: entering thinking mode", chunkCount);
                 continue;
             }
-            
+
             if (isThinking)
             {
-                if (content.Contains("</think>") || content.Contains("<|end_of_box|>")) 
+                if (content.Contains("</think>") || content.Contains("<|end_of_box|>"))
                 {
                     isThinking = false;
+                    logger.LogDebug("SendToLlmProviderStream chunk #{ChunkIndex}: exiting thinking mode", chunkCount);
                     continue;
                 }
 
+                thinkingChunkCount++;
                 yield return new StreamingResult { Thinking = content };
             }
             else
             {
+                contentChunkCount++;
+                if (contentChunkCount == 1)
+                {
+                    logger.LogInformation(
+                        "SendToLlmProviderStream first content chunk #{ChunkIndex}, length={Length}",
+                        chunkCount,
+                        content.Length);
+                }
+
                 yield return new StreamingResult { Content = content };
             }
         }
+
+        logger.LogInformation(
+            "SendToLlmProviderStream completed: sessionId={SessionId}, totalSkChunks={TotalChunks}, contentChunks={ContentChunks}, thinkingChunks={ThinkingChunks}",
+            session,
+            chunkCount,
+            contentChunkCount,
+            thinkingChunkCount);
     }
 
     /// <summary>
@@ -494,16 +613,10 @@ public class LlmService(ILlmRepository llmRepository, ILlmProviderFactory provid
                 {
                     Name = tool?.Tool?.Name,
                     Description = tool?.Tool?.Description,
-                    Parameters = new FunctionParameters
-                    {
-                        Type = "object",
-                        Properties = new Dictionary<string, FunctionProperty>(),
-                        Required = Array.Empty<string>()
-                    }
-                }
+                    Parameters = OpenAiToolSchemaBuilder.BuildMoonshotSafeParameters(tool?.Tool?.Parameters),
+                },
             };
 
-            ParseAndAdolParameters(tool, toolFunction);
             return toolFunction;
         }
         catch
@@ -578,4 +691,9 @@ public class LlmService(ILlmRepository llmRepository, ILlmProviderFactory provid
             "object" => "object",
             _ => "string"
         };
+
+    private ILLmProviderRepository ResolveOpenAiCompatibleRepository(LlmConfig config) =>
+        config.Provider == LLMProviderType.Ollama
+            ? providerFactory.GetProvider("ollama")
+            : providerFactory.GetProvider("openai");
 }

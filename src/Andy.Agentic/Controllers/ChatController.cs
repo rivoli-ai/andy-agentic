@@ -4,8 +4,9 @@ using System.Text.Json;
 using Andy.Agentic.Application.DTOs;
 using Andy.Agentic.Application.Interfaces;
 using MapsterMapper;
-using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Logging;
 
 namespace Andy.Agentic.Controllers;
 
@@ -15,7 +16,11 @@ namespace Andy.Agentic.Controllers;
 [ApiController]
 [Route("api/[controller]")]
 [Authorize]
-public class ChatController(IChatService chatService, IMapper mapper, IAuthService authService) : ControllerBase
+public class ChatController(
+    IChatService chatService,
+    IMapper mapper,
+    IAuthService authService,
+    ILogger<ChatController> logger) : ControllerBase
 {
     /// <summary>
     ///     Sends a message to an agent and streams the response back in real-time using Server-Sent Events.
@@ -39,6 +44,7 @@ public class ChatController(IChatService chatService, IMapper mapper, IAuthServi
             var currentUser = await authService.GetCurrentUserAsync();
             if (currentUser == null)
             {
+                logger.LogWarning("Chat stream rejected: user not authenticated");
                 var errorJson = JsonSerializer.Serialize(new
                 {
                     error = new { message = "User not authenticated", type = "auth_error" }
@@ -51,22 +57,44 @@ public class ChatController(IChatService chatService, IMapper mapper, IAuthServi
             var mappedMessage = mapper.Map<ChatMessage>(chatMessage);
             mappedMessage.UserId = currentUser.Id;
 
-            // Debug: Log images count
-            Console.WriteLine($"[ChatController] Received images count: {chatMessage.Images?.Count ?? 0}");
-            Console.WriteLine($"[ChatController] Mapped images count: {mappedMessage.Images?.Count ?? 0}");
+            logger.LogInformation(
+                "Chat stream started: userId={UserId}, agentId={AgentId}, sessionId={SessionId}, contentLength={ContentLength}, imageCount={ImageCount}",
+                currentUser.Id,
+                chatMessage.AgentId,
+                chatMessage.SessionId,
+                chatMessage.Content?.Length ?? 0,
+                chatMessage.Images?.Count ?? 0);
 
+            var sseChunkCount = 0;
             await foreach (var chunk in chatService.GetMessageStreamAsync(mappedMessage, cancellationToken))
             {
+                sseChunkCount++;
                 var jsonResponse = JsonSerializer.Serialize(chunk,
                     new JsonSerializerOptions { Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping });
+
+                if (sseChunkCount == 1)
+                {
+                    logger.LogInformation("Chat stream first SSE chunk written (length={Length})", jsonResponse.Length);
+                }
 
                 await Response.WriteAsync($"data: {jsonResponse}\n\n", Encoding.UTF8);
                 await Response.Body.FlushAsync();
                 await Task.Delay(1);
             }
+
+            logger.LogInformation(
+                "Chat stream completed: agentId={AgentId}, sessionId={SessionId}, sseChunks={SseChunkCount}",
+                chatMessage.AgentId,
+                chatMessage.SessionId,
+                sseChunkCount);
         }
         catch (Exception ex)
         {
+            logger.LogError(
+                ex,
+                "Chat stream failed: agentId={AgentId}, sessionId={SessionId}",
+                chatMessage.AgentId,
+                chatMessage.SessionId);
             var errorJson = JsonSerializer.Serialize(new
             {
                 error = new { message = ex.Message, type = "internal_error" }

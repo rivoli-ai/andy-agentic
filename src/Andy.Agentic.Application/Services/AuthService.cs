@@ -1,3 +1,5 @@
+using System.IdentityModel.Tokens.Jwt;
+using System.Security.Claims;
 using Andy.Agentic.Application.DTOs;
 using Andy.Agentic.Application.Interfaces;
 using Andy.Agentic.Domain.Entities;
@@ -38,7 +40,10 @@ public class AuthService : IAuthService
             return null;
         }
 
-        var azureAdId = httpContext.User.FindFirst("oid")?.Value ??
+        var azureAdId = httpContext.User.FindFirst(JwtRegisteredClaimNames.Sub)?.Value ??
+                        httpContext.User.FindFirst("sub")?.Value ??
+                        httpContext.User.FindFirst("oid")?.Value ??
+                        httpContext.User.FindFirst(ClaimTypes.NameIdentifier)?.Value ??
                         httpContext.User.FindFirst("http://schemas.microsoft.com/identity/claims/objectidentifier")?.Value;
 
         if (string.IsNullOrEmpty(azureAdId))
@@ -66,9 +71,15 @@ public class AuthService : IAuthService
 
         var existingUser = await _userRepository.GetByAzureAdIdAsync(azureAdId);
 
+        // Re-link users created under a different external id (e.g. MSAL oid vs gateway sub).
+        if (existingUser == null && !string.IsNullOrWhiteSpace(email))
+        {
+            existingUser = await _userRepository.GetByEmailAsync(email);
+        }
+
         if (existingUser != null)
         {
-            // Update existing user
+            existingUser.AzureAdId = azureAdId;
             existingUser.Email = email;
             existingUser.DisplayName = displayName;
             existingUser.FirstName = firstName;

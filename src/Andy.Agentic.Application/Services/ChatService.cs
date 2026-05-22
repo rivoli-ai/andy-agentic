@@ -2,6 +2,7 @@ using Andy.Agentic.Application.Interfaces;
 using Andy.Agentic.Domain.Interfaces.Database;
 using Andy.Agentic.Domain.Models;
 using Andy.Agentic.Domain.Queries.SearchCriteria;
+using Microsoft.Extensions.Logging;
 using System.Linq;
 using System.Runtime.CompilerServices;
 
@@ -16,7 +17,8 @@ namespace Andy.Agentic.Application.Services;
 public class ChatService(
     IDataBaseService databaseResourceAccess,
     ILlmService llmResourceAccess,
-    IToolExecutionService toolExecutionService)
+    IToolExecutionService toolExecutionService,
+    ILogger<ChatService> logger)
     : IChatService
 {
     private const string UserRole = "user";
@@ -59,12 +61,12 @@ public class ChatService(
         var sessionId = chatMessage.SessionId ??  await databaseResourceAccess.CreateNewChatSessionAsync(chatMessage.AgentId.Value);
 
         // Debug: Log images count
-        Console.WriteLine($"[ChatService] Images count before sending: {chatMessage.Images?.Count ?? 0}");
-        if (chatMessage.Images != null && chatMessage.Images.Any())
-        {
-            Console.WriteLine($"[ChatService] First image MIME type: {chatMessage.Images[0].MimeType}");
-            Console.WriteLine($"[ChatService] First image data length: {chatMessage.Images[0].Data?.Length ?? 0}");
-        }
+        logger.LogInformation(
+            "SendMessageStream starting: agentId={AgentId}, sessionId={SessionId}, contentLength={ContentLength}, imageCount={ImageCount}",
+            chatMessage.AgentId,
+            chatMessage.SessionId,
+            chatMessage.Content?.Length ?? 0,
+            chatMessage.Images?.Count ?? 0);
 
         await SaveUserMessageAsync(chatMessage, sessionId);
 
@@ -96,34 +98,55 @@ public class ChatService(
 
         var recentMessages = await databaseResourceAccess.GetChatHistoryBySessionAsync(sessionId);
 
-        // Debug: Log images count
-        Console.WriteLine($"[ChatService.SendMessageStreamRecursiveAsync] Images count: {images?.Count ?? 0}");
+        logger.LogInformation(
+            "SendMessageStreamRecursiveAsync: sessionId={SessionId}, agentId={AgentId}, historyCount={HistoryCount}, imageCount={ImageCount}",
+            sessionId,
+            agent.Id,
+            recentMessages.Count(),
+            images?.Count ?? 0);
 
         var chatRequest = await llmResourceAccess.PrepareLlmMessageAsync(agent, activePrompt, messageContent, sessionId, recentMessages.ToList(), images);
 
         var responseContent = new List<string?>();
         var thinkingContent = new List<string?>();
         var recorder = new ToolExecutionRecorder();
+        var outboundChunkCount = 0;
 
         await foreach (var chunk in llmResourceAccess.SendToLlmProviderStreamAsync(agent, chatRequest, sessionId, recorder, cancellationToken))
         {
+            outboundChunkCount++;
             if (cancellationToken.IsCancellationRequested)
             {
+                logger.LogWarning(
+                    "SendMessageStreamRecursiveAsync cancelled: sessionId={SessionId}, chunksSent={ChunkCount}",
+                    sessionId,
+                    outboundChunkCount);
                 await SaveAssistantMessageAsync(agent, sessionId, responseContent, thinkingContent, recorder.Records.ToList());
                 cancellationToken.ThrowIfCancellationRequested();
             }
             
-            // Check if this chunk contains thinking content
             if (!string.IsNullOrEmpty(chunk.Thinking))
             {
                 thinkingContent.Add(chunk.Thinking);
-                // Don't yield thinking content as part of the main response
-                yield return chunk!;
             }
-            
-            responseContent.Add(chunk.Content);
-            yield return chunk!;
+
+            if (!string.IsNullOrEmpty(chunk.Content))
+            {
+                responseContent.Add(chunk.Content);
+            }
+
+            if (!string.IsNullOrEmpty(chunk.Thinking) || !string.IsNullOrEmpty(chunk.Content))
+            {
+                yield return chunk;
+            }
         }
+
+        logger.LogInformation(
+            "SendMessageStreamRecursiveAsync completed: sessionId={SessionId}, outboundChunks={ChunkCount}, responseChars={ResponseChars}, thinkingChars={ThinkingChars}",
+            sessionId,
+            outboundChunkCount,
+            string.Concat(responseContent.Where(c => c != null)).Length,
+            string.Concat(thinkingContent.Where(c => c != null)).Length);
 
         // Always save the message
         await SaveAssistantMessageAsync(agent, sessionId, responseContent, thinkingContent, recorder.Records.ToList());
@@ -140,29 +163,50 @@ public class ChatService(
     /// <returns>An async enumerable of formatted response objects.</returns>
     public async IAsyncEnumerable<object> GetMessageStreamAsync(ChatMessage chatMessage, [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
+        var sseChunkCount = 0;
         await foreach (var chunk in SendMessageStreamAsync(chatMessage, cancellationToken))
         {
-            if (chunk != null)
+            if (chunk == null)
             {
-                yield return new
-                {
-                    id = $"chatcmpl-{Guid.NewGuid()}",
-                    @object = ChatCompletionObject,
-                    created = DateTimeOffset.UtcNow.ToUnixTimeSeconds(),
-                    model = AgentModelName,
-                    choices = new[]
-                    {
-                        new
-                        {
-                            index = 0,
-                            delta = new {thinking = chunk.Thinking, content = chunk.Content },
-                            finish_reason = (string?)null
-                        }
-                    }
-                };
+                continue;
+            }
+
+            if (!string.IsNullOrEmpty(chunk.Thinking))
+            {
+                sseChunkCount++;
+                yield return CreateSseChunk(thinking: chunk.Thinking);
+            }
+
+            if (!string.IsNullOrEmpty(chunk.Content))
+            {
+                sseChunkCount++;
+                yield return CreateSseChunk(content: chunk.Content);
             }
         }
+
+        logger.LogInformation(
+            "GetMessageStreamAsync completed: sessionId={SessionId}, sseChunks={SseChunkCount}",
+            chatMessage.SessionId,
+            sseChunkCount);
     }
+
+    private static object CreateSseChunk(string? thinking = null, string? content = null) =>
+        new
+        {
+            id = $"chatcmpl-{Guid.NewGuid()}",
+            @object = ChatCompletionObject,
+            created = DateTimeOffset.UtcNow.ToUnixTimeSeconds(),
+            model = AgentModelName,
+            choices = new[]
+            {
+                new
+                {
+                    index = 0,
+                    delta = new { thinking, content },
+                    finish_reason = (string?)null,
+                },
+            },
+        };
 
     /// <summary>
     /// Gets the complete chat history for a specific agent.
@@ -453,12 +497,24 @@ public class ChatService(
     {
         var fullResponse = string.Join("", responseContent);
         var fullThinking = string.Join("", thinkingContent);
-        // Save all tool executions, both successful and failed
         var allExecutions = toolResults.ToList();
+        var persistableExecutions = allExecutions.Where(e => e.ToolId != Guid.Empty).ToList();
 
-        if (string.IsNullOrEmpty(fullResponse) && !toolResults.Any())
+        if (string.IsNullOrWhiteSpace(fullResponse))
         {
-            return;
+            if (!allExecutions.Any())
+            {
+                logger.LogDebug(
+                    "Skipping save of empty assistant message for sessionId={SessionId}",
+                    sessionId);
+                return;
+            }
+
+            fullResponse = string.Join(
+                "\n",
+                allExecutions.Select(e => e.Success
+                    ? $"[{e.ToolName}] {e.Result}"
+                    : $"[{e.ToolName}] Error: {e.ErrorMessage ?? e.Result}"));
         }
 
         await databaseResourceAccess.SaveChatMessageAsync(new ChatMessage
@@ -468,8 +524,8 @@ public class ChatService(
             AgentId = agent.Id,
             SessionId = sessionId,
             TokenCount = fullResponse.Length * DefaultTokenCountMultiplier,
-            ToolResults = allExecutions,
-            IsToolExecution = allExecutions.Any(),
+            ToolResults = persistableExecutions,
+            IsToolExecution = persistableExecutions.Any(),
             Thinking = string.IsNullOrEmpty(fullThinking) ? null : fullThinking
         });
     }

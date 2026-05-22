@@ -58,7 +58,7 @@ public class LlmConfig
     public int? MaxTokens { get; set; }
 
     /// <summary>
-    ///     Gets or sets the temperature setting for response randomness (0.0 to 2.0).
+    ///     Gets or sets the temperature for the thinking/reasoning phase (Kimi hybrid: default 1.0).
     /// </summary>
     public double? Temperature { get; set; }
 

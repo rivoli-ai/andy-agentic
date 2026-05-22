@@ -33,6 +33,25 @@ public interface ILLmProviderRepository
          List<OpenAiTool> tools);
 
     /// <summary>
+    /// Streams chat completions from raw SSE, including provider-specific fields like Kimi <c>reasoning_content</c>.
+    /// </summary>
+    IAsyncEnumerable<StreamingResult> StreamChatMessagesAsync(
+        LlmConfig config,
+        IReadOnlyList<ChatHistory> messages,
+        IReadOnlyList<OpenAiTool>? tools = null,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Streams a thinking-model chat, optionally executing tool rounds via <paramref name="executeTools"/>.
+    /// </summary>
+    IAsyncEnumerable<StreamingResult> StreamThinkingChatAsync(
+        LlmConfig config,
+        IReadOnlyList<ChatHistory> messages,
+        IReadOnlyList<OpenAiTool>? tools,
+        ToolCallExecutor? executeTools,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
     ///     Checks if this repository can handle the given provider
     /// </summary>
     /// <param name="provider">Provider name to check</param>

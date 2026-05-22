@@ -195,13 +195,15 @@ public class AgentsControllerTests
 
 
         // Arrange
+        var llmConfigId = Guid.NewGuid();
         var updateAgent = new AgentDto
         {
             CreatedByUserId = currentUser.Id,
             Id = Guid.NewGuid(),
             Name = "Updated Agent",
             Description = "Updated Description",
-            IsActive = true
+            IsActive = true,
+            LlmConfigId = llmConfigId,
         };
 
         var mockedAgent = new Agent
@@ -210,7 +212,8 @@ public class AgentsControllerTests
             Name = updateAgent.Name,
             Description = updateAgent.Description,
             IsActive = updateAgent.IsActive,
-            CreatedByUserId = currentUser.Id
+            CreatedByUserId = currentUser.Id,
+            LlmConfigId = llmConfigId,
         };
 
         _mockAgentService

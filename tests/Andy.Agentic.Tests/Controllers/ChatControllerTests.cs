@@ -5,6 +5,7 @@ using Andy.Agentic.Domain.Models;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using System.Security.Claims;
 using Moq;
 using FluentAssertions;
@@ -25,7 +26,11 @@ public class ChatControllerTests
         _mockChatService = new Mock<IChatService>();
         _mockMapper = new Mock<IMapper>();
         _mockAuthService = new Mock<IAuthService>();
-        _controller = new ChatController(_mockChatService.Object, _mockMapper.Object, _mockAuthService.Object);
+        _controller = new ChatController(
+            _mockChatService.Object,
+            _mockMapper.Object,
+            _mockAuthService.Object,
+            NullLogger<ChatController>.Instance);
         
         // Setup controller context with user claims
         var claims = new List<Claim>

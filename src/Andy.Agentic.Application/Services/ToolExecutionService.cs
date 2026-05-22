@@ -50,7 +50,16 @@ public class ToolExecutionService(
             }
             catch (Exception ex)
             {
-                toolResults.Add(new ToolExecutionLog{ErrorMessage = ex.Message,Success = false});
+                toolResults.Add(new ToolExecutionLog
+                {
+                    ErrorMessage = ex.Message,
+                    Success = false,
+                    ToolId = request.ToolId,
+                    ToolName = request.ToolName,
+                    AgentId = request.AgentId,
+                    SessionId = request.SessionId,
+                    Parameters = request.Parameters,
+                });
             }
         }
 
@@ -90,7 +99,8 @@ public class ToolExecutionService(
             var provider = toolProviders.FirstOrDefault(p => p.CanHandleToolType(tool.Type));
             if (provider == null)
             {
-                throw new NotSupportedException($"No provider found for tool type: {tool.Type}");
+                throw new NotSupportedException(
+                    $"No provider found for tool type: {tool.Type}. Registered providers: {string.Join(", ", toolProviders.Select(p => p.ToolType))}");
             }
 
             var result = await provider.ExecuteToolAsync(tool, request.Parameters);
@@ -110,9 +120,12 @@ public class ToolExecutionService(
             {
                 Success = false,
                 ErrorMessage = ex.Message,
+                ToolId = request.ToolId,
                 ToolName = request.ToolName,
+                AgentId = request.AgentId,
+                SessionId = request.SessionId,
                 Parameters = request.Parameters,
-                ExecutionTime = stopwatch.ElapsedMilliseconds
+                ExecutionTime = stopwatch.ElapsedMilliseconds,
             };
         }
     }
@@ -188,8 +201,19 @@ public class ToolExecutionService(
     /// </summary>
     /// <param name="errorMessage">The error message describing the failure.</param>
     /// <returns>A tool execution log  with error information.</returns>
-    public ToolExecutionLog CreateErrorResponse(string errorMessage) =>
-        new() { Success = false, ErrorMessage = errorMessage };
+    public ToolExecutionLog CreateErrorResponse(
+        string errorMessage,
+        string? toolName = null,
+        Guid? toolId = null,
+        Guid? agentId = null) =>
+        new()
+        {
+            Success = false,
+            ErrorMessage = errorMessage,
+            ToolName = toolName ?? string.Empty,
+            ToolId = toolId ?? Guid.Empty,
+            AgentId = agentId,
+        };
 
     /// <summary>
     ///     Prepares a single tool execution by validating the tool and parsing arguments.
@@ -207,7 +231,10 @@ public class ToolExecutionService(
             if (tool == null)
             {
                 return (null,
-                    CreateErrorResponse($"Tool '{toolCall.Function.Name}' not found or not assigned to this agent"));
+                    CreateErrorResponse(
+                        $"Tool '{toolCall.Function.Name}' not found or not assigned to this agent",
+                        toolCall.Function.Name,
+                        agentId: agent.Id));
             }
 
             var parameters = ParseToolCallArguments(toolCall.Function.Arguments);
@@ -250,16 +277,7 @@ public class ToolExecutionService(
             }
             else if (result.Error != null)
             {
-                // Create a placeholder request with error for consistency
-                var placeholderRequest = new ToolExecutionLog
-                {
-                    ToolId = Guid.Empty,
-                    ToolName = toolCall.Function.Name,
-                    Parameters = new Dictionary<string, object>(),
-                    SessionId = null,
-                    AgentId = agent.Id
-                };
-                results.Add((placeholderRequest, result.Error));
+                results.Add((result.Error, result.Error));
             }
         }
 
