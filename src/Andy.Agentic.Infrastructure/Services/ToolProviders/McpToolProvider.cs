@@ -32,8 +32,7 @@ public class McpToolProvider(ILogger<McpToolProvider> logger, HttpClient httpCli
             var mcpType = GetConfigValue(configuration, "mcpType", "auto");
             var toolName = GetRequiredConfigValue<string>(configuration, "name");
 
-
-            client = await CreateMcpClientAsync(endpoint, mcpType, configuration, auth);
+            client = await CreateMcpClientAsync(endpoint, mcpType, configuration, tool.Headers, auth);
 
             var result = await client.CallToolAsync(toolName, requestParameters);
 
@@ -57,24 +56,25 @@ public class McpToolProvider(ILogger<McpToolProvider> logger, HttpClient httpCli
         string endpoint,
         string mcpType,
         Dictionary<string, object> configuration,
+        string? customHeaders,
         Dictionary<string, object> auth,
         CancellationToken cancellationToken = default)
     {
-        var authHeaders = await ToolAuthHeaderBuilder
-            .BuildHeadersAsync(auth, _httpClient, cancellationToken)
+        var httpHeaders = await ToolHeadersParser
+            .BuildMergedHttpHeadersAsync(customHeaders, auth, _httpClient, cancellationToken)
             .ConfigureAwait(false);
 
         IClientTransport transport = McpHttpTransportHelper.IsStdio(mcpType)
-            ? CreateStdioTransport(endpoint, configuration, auth)
-            : CreateHttpTransport(endpoint, configuration, authHeaders, McpHttpTransportHelper.GetModeForExecution(mcpType, endpoint));
+            ? CreateStdioTransport(endpoint, configuration, httpHeaders)
+            : CreateHttpTransport(endpoint, configuration, httpHeaders, McpHttpTransportHelper.GetModeForExecution(mcpType, endpoint));
 
         return await McpClient.CreateAsync(transport, new McpClientOptions(), NullLoggerFactory.Instance, cancellationToken);
     }
 
-    private IClientTransport CreateStdioTransport(
+    private static IClientTransport CreateStdioTransport(
         string endpoint,
         Dictionary<string, object> configuration,
-        Dictionary<string, object> auth)
+        IReadOnlyDictionary<string, string> headers)
     {
         var commandParts = endpoint.Split(' ', StringSplitOptions.RemoveEmptyEntries);
         if (commandParts.Length == 0)
@@ -86,8 +86,7 @@ public class McpToolProvider(ILogger<McpToolProvider> logger, HttpClient httpCli
         var workingDirectory = GetConfigValue<string>(configuration, "workingDirectory", null);
         var environmentVariables = GetConfigValue(configuration, "env", new Dictionary<string, string>());
 
-        foreach (var kvp in auth)
-            environmentVariables[kvp.Key] = kvp.Value?.ToString() ?? string.Empty;
+        ToolHeadersParser.ApplyToEnvironmentVariables(headers, environmentVariables);
 
         var options = new StdioClientTransportOptions
         {
@@ -101,17 +100,17 @@ public class McpToolProvider(ILogger<McpToolProvider> logger, HttpClient httpCli
         return new StdioClientTransport(options, NullLoggerFactory.Instance);
     }
 
-    private IClientTransport CreateHttpTransport(
+    private static IClientTransport CreateHttpTransport(
         string endpoint,
         Dictionary<string, object> configuration,
-        IReadOnlyDictionary<string, string> authHeaders,
+        IReadOnlyDictionary<string, string> httpHeaders,
         HttpTransportMode transportMode)
     {
         var timeout = GetConfigValue<TimeSpan?>(configuration, "timeout", null);
         return McpHttpTransportFactory.Create(
             endpoint,
             transportMode,
-            authHeaders,
+            httpHeaders,
             GetConfigValue(configuration, "name", "MCP HTTP Client"),
             timeout);
     }

@@ -27,15 +27,16 @@ public class McpService : IMcpService
         string serverUrl,
         string? transport = null,
         string? authentication = null,
+        string? headers = null,
         CancellationToken cancellationToken = default)
     {
         try
         {
             var mode = McpHttpTransportHelper.GetModeForDiscovery(transport, serverUrl);
-            var authHeaders = await ToolAuthHeaderBuilder
-                .BuildHeadersAsync(authentication, _httpClient, cancellationToken)
+            var httpHeaders = await ToolHeadersParser
+                .BuildMergedHttpHeadersAsync(headers, authentication, _httpClient, cancellationToken)
                 .ConfigureAwait(false);
-            var clientTransport = McpHttpTransportFactory.Create(serverUrl, mode, authHeaders, "MCP Discovery Client");
+            var clientTransport = McpHttpTransportFactory.Create(serverUrl, mode, httpHeaders, "MCP Discovery Client");
             await using var client = await McpClient
                 .CreateAsync(clientTransport, new McpClientOptions(), NullLoggerFactory.Instance, default)
                 .ConfigureAwait(false);

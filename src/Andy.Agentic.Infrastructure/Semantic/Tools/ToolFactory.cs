@@ -3,6 +3,7 @@ using System.Text.Json;
 using Andy.Agentic.Domain.Interfaces.Llm.Semantic;
 using Andy.Agentic.Domain.Models;
 using Andy.Agentic.Domain.Models.Semantic;
+using Andy.Agentic.Infrastructure.Services.ToolProviders;
 using Microsoft.SemanticKernel;
 
 namespace Andy.Agentic.Infrastructure.Semantic.Tools;
@@ -76,42 +77,8 @@ public abstract class ToolFactory : IToolFactory
     /// </summary>
     protected static Dictionary<string, object> ParseHeaders(string? headers)
     {
-        if (string.IsNullOrEmpty(headers))
-        {
-            return new Dictionary<string, object>();
-        }
-
-        try
-        {
-            var headerArray = JsonSerializer.Deserialize<JsonElement[]>(headers);
-            if (headerArray == null)
-            {
-                return new Dictionary<string, object>();
-            }
-
-            var result = new Dictionary<string, object>();
-
-            foreach (var item in headerArray)
-            {
-                if (item.TryGetProperty("name", out var nameElement) &&
-                    item.TryGetProperty("value", out var valueElement))
-                {
-                    var name = nameElement.GetString();
-                    var value = valueElement.GetString();
-
-                    if (!string.IsNullOrEmpty(name))
-                    {
-                        result[name] = value ?? string.Empty;
-                    }
-                }
-            }
-
-            return result;
-        }
-        catch (JsonException ex)
-        {
-            throw new ArgumentException("Invalid JSON in tool headers", nameof(headers), ex);
-        }
+        return ToolHeadersParser.Parse(headers)
+            .ToDictionary(kvp => kvp.Key, kvp => (object)kvp.Value, StringComparer.OrdinalIgnoreCase);
     }
 
     /// <summary>

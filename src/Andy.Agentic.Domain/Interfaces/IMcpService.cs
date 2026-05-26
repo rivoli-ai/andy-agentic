@@ -16,6 +16,7 @@ public interface IMcpService
         string serverUrl,
         string? transport = null,
         string? authentication = null,
+        string? headers = null,
         CancellationToken cancellationToken = default);
 
     /// <summary>

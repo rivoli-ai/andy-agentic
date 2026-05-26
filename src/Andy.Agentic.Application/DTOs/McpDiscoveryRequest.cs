@@ -22,4 +22,9 @@ public class McpDiscoveryRequest
     /// Optional authentication JSON (same shape as tool <c>authentication</c>) sent as MCP HTTP headers during discovery.
     /// </summary>
     public string? Authentication { get; set; }
+
+    /// <summary>
+    /// Optional headers JSON (same shape as tool <c>headers</c>) sent as MCP HTTP headers during discovery.
+    /// </summary>
+    public string? Headers { get; set; }
 }

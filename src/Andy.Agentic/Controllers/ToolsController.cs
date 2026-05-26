@@ -252,6 +252,7 @@ public class ToolsController(IToolService toolService, IMapper mapper, IMcpServi
         [FromQuery] string url,
         [FromQuery] string? transport = null,
         [FromQuery] string? authentication = null,
+        [FromQuery] string? headers = null,
         CancellationToken cancellationToken = default)
     {
         try
@@ -261,7 +262,7 @@ public class ToolsController(IToolService toolService, IMapper mapper, IMcpServi
                 return BadRequest(new { error = "URL is required" });
             }
 
-            var response = await mcpService.DiscoverToolsAsync(url, transport, authentication, cancellationToken);
+            var response = await mcpService.DiscoverToolsAsync(url, transport, authentication, headers, cancellationToken);
             return Ok(response);
         }
         catch (Exception ex)
@@ -291,6 +292,7 @@ public class ToolsController(IToolService toolService, IMapper mapper, IMcpServi
                 request.Url,
                 request.Transport,
                 request.Authentication,
+                request.Headers,
                 cancellationToken);
             
             if (!response.Success)

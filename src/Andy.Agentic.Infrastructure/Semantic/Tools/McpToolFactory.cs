@@ -29,10 +29,9 @@ public class McpToolFactory : ToolFactory
         async Task<string> DynamicMcpCall(KernelArguments args)
         {
             var configuration = ParseConfiguration(tool.Configuration);
-            var headers = ParseHeaders(tool.Headers);
-            var authHeaders = await ToolAuthHeaderBuilder.BuildHeadersAsync(tool.Authentication).ConfigureAwait(false);
-            foreach (var (key, value) in authHeaders)
-                headers[key] = value;
+            var httpHeaders = await ToolHeadersParser
+                .BuildMergedHttpHeadersAsync(tool.Headers, tool.Authentication)
+                .ConfigureAwait(false);
 
             var endpoint = GetRequiredConfigValue<string>(configuration, "endpoint");
             var mcpType = GetConfigValue(configuration, "mcpType", "auto");
@@ -40,7 +39,7 @@ public class McpToolFactory : ToolFactory
 
             var remoteToolName = GetConfigValue(configuration, "name", tool.Name);
 
-            var client = await GetOrCreateClientAsync(endpoint, mcpType, workingDirectory, configuration, headers);
+            var client = await GetOrCreateClientAsync(endpoint, mcpType, workingDirectory, configuration, httpHeaders);
 
             var callArgs = ParseToolCallArguments(args);
 
@@ -100,17 +99,14 @@ public class McpToolFactory : ToolFactory
         string mcpType,
         string? workingDirectory,
         Dictionary<string, object> configuration,
-        Dictionary<string, object> headers)
+        Dictionary<string, string> headers)
     {
         var transport = McpHttpTransportHelper.IsStdio(mcpType)
             ? CreateStdioTransport(endpoint, configuration, headers, workingDirectory)
             : CreateHttpTransport(
                 endpoint,
                 configuration,
-                headers.ToDictionary(
-                    kvp => kvp.Key,
-                    kvp => kvp.Value?.ToString() ?? string.Empty,
-                    StringComparer.OrdinalIgnoreCase),
+                headers,
                 McpHttpTransportHelper.GetModeForExecution(mcpType, endpoint));
 
         return await McpClient.CreateAsync(transport, new McpClientOptions(), NullLoggerFactory.Instance, default)
@@ -128,7 +124,7 @@ public class McpToolFactory : ToolFactory
     private static IClientTransport CreateStdioTransport(
             string endpoint,
             Dictionary<string, object> configuration,
-            Dictionary<string, object> headers,
+            IReadOnlyDictionary<string, string> headers,
             string? workingDirectory)
     {
         // endpoint format: "<command> [args...]"
@@ -144,12 +140,7 @@ public class McpToolFactory : ToolFactory
         // Base env from config
         var env = GetConfigValue(configuration, "env", new Dictionary<string, string>());
 
-        // Map headers to env vars (e.g., "Authorization" -> "AUTHORIZATION")
-        foreach (var kvp in headers)
-        {
-            var envKey = kvp.Key.Replace('-', '_').ToUpperInvariant();
-            env[envKey] = kvp.Value.ToString() ?? string.Empty;
-        }
+        ToolHeadersParser.ApplyToEnvironmentVariables(headers, env!);
 
         var options = new StdioClientTransportOptions
         {
