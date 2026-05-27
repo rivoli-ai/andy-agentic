@@ -49,6 +49,7 @@ public interface ILLmProviderRepository
         IReadOnlyList<ChatHistory> messages,
         IReadOnlyList<OpenAiTool>? tools,
         ToolCallExecutor? executeTools,
+        string? systemInstruction = null,
         CancellationToken cancellationToken = default);
 
     /// <summary>

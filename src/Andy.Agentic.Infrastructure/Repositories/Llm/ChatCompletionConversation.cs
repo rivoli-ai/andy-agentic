@@ -1,4 +1,3 @@
-using System.Text.Json;
 using Andy.Agentic.Domain.Models;
 
 namespace Andy.Agentic.Infrastructure.Repositories.Llm;
@@ -10,41 +9,63 @@ internal sealed class ChatCompletionConversation
 {
     public List<Dictionary<string, object>> Messages { get; } = new();
 
-    public static ChatCompletionConversation FromHistory(IReadOnlyList<ChatHistory> history)
+    public static ChatCompletionConversation FromHistory(
+        IReadOnlyList<ChatHistory> history,
+        string? systemInstruction = null)
     {
         var conversation = new ChatCompletionConversation();
+
+        if (!string.IsNullOrWhiteSpace(systemInstruction))
+        {
+            conversation.Messages.Add(new Dictionary<string, object>
+            {
+                ["role"] = "system",
+                ["content"] = systemInstruction,
+            });
+        }
 
         foreach (var message in history.OrderBy(m => m.Timestamp))
         {
             if (message.Role == "user")
             {
-                if (!string.IsNullOrWhiteSpace(message.Content))
+                var content = OpenAiChatMessageContentBuilder.BuildUserContent(message.Content, message.Images);
+                if (content is null)
                 {
-                    conversation.Messages.Add(new Dictionary<string, object>
-                    {
-                        ["role"] = "user",
-                        ["content"] = message.Content,
-                    });
+                    continue;
                 }
+
+                conversation.Messages.Add(new Dictionary<string, object>
+                {
+                    ["role"] = "user",
+                    ["content"] = content,
+                });
 
                 continue;
             }
 
-            if (message.Role == "assistant" && !string.IsNullOrWhiteSpace(message.Content))
+            if (message.Role != "assistant")
             {
-                var assistant = new Dictionary<string, object>
-                {
-                    ["role"] = "assistant",
-                    ["content"] = message.Content,
-                };
-
-                if (!string.IsNullOrWhiteSpace(message.Thinking))
-                {
-                    assistant["reasoning_content"] = message.Thinking;
-                }
-
-                conversation.Messages.Add(assistant);
+                continue;
             }
+
+            var assistantText = OpenAiChatMessageContentBuilder.BuildAssistantText(message);
+            if (string.IsNullOrWhiteSpace(assistantText) && string.IsNullOrWhiteSpace(message.Thinking))
+            {
+                continue;
+            }
+
+            var assistant = new Dictionary<string, object>
+            {
+                ["role"] = "assistant",
+                ["content"] = assistantText,
+            };
+
+            if (!string.IsNullOrWhiteSpace(message.Thinking))
+            {
+                assistant["reasoning_content"] = message.Thinking;
+            }
+
+            conversation.Messages.Add(assistant);
         }
 
         return conversation;

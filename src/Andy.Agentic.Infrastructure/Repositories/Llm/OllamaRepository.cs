@@ -37,6 +37,7 @@ public class OllamaRepository(HttpClient httpClient) : ILLmProviderRepository
         IReadOnlyList<ChatHistory> messages,
         IReadOnlyList<OpenAiTool>? tools,
         ToolCallExecutor? executeTools,
+        string? systemInstruction = null,
         CancellationToken cancellationToken = default) =>
         throw new NotSupportedException("Thinking chat streaming is not supported for Ollama.");
 
@@ -61,7 +62,7 @@ public class OllamaRepository(HttpClient httpClient) : ILLmProviderRepository
 
         HttpResponseMessage? response = null;
         string? errorMessage = null;
-        
+
         try
         {
             response = await httpClient.PostAsync(endpoint, content);
@@ -91,7 +92,9 @@ public class OllamaRepository(HttpClient httpClient) : ILLmProviderRepository
         }
 
         await foreach (var chunk in ProcessOllamaStreamingResponseAsync(response))
+        {
             yield return chunk;
+        }
     }
 
     private static object CreateOllamaRequest(LlmConfig llmConfig, string message)
@@ -130,14 +133,22 @@ public class OllamaRepository(HttpClient httpClient) : ILLmProviderRepository
 
         while (await reader.ReadLineAsync() is { } line)
         {
-            if (string.IsNullOrWhiteSpace(line)) continue;
+            if (string.IsNullOrWhiteSpace(line))
+            {
+                continue;
+            }
 
             var jsonContent = ExtractJsonFromStreamLine(line);
-            if (string.IsNullOrEmpty(jsonContent)) continue;
+            if (string.IsNullOrEmpty(jsonContent))
+            {
+                continue;
+            }
 
             var content = ParseOllamaStreamingResponse(jsonContent);
             if (!string.IsNullOrEmpty(content))
+            {
                 yield return content;
+            }
         }
     }
 
@@ -155,7 +166,9 @@ public class OllamaRepository(HttpClient httpClient) : ILLmProviderRepository
     private static string ParseOllamaStreamingResponse(string jsonContent)
     {
         if (string.IsNullOrWhiteSpace(jsonContent))
+        {
             return string.Empty;
+        }
 
         try
         {
@@ -163,10 +176,14 @@ public class OllamaRepository(HttpClient httpClient) : ILLmProviderRepository
 
             if (jsonDoc.RootElement.TryGetProperty("message", out var messageElement) &&
                 messageElement.TryGetProperty("content", out var contentElement))
+            {
                 return contentElement.GetString() ?? string.Empty;
+            }
 
             if (jsonDoc.RootElement.TryGetProperty("response", out var responseElement))
+            {
                 return responseElement.GetString() ?? string.Empty;
+            }
 
             return string.Empty;
         }

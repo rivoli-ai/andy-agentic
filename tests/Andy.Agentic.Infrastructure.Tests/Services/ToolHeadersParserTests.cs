@@ -19,14 +19,26 @@ public class ToolHeadersParserTests
     }
 
     [Fact]
-    public async Task BuildMergedHttpHeadersAsync_AuthOverridesCustomHeaderWithSameName()
+    public async Task BuildMergedHttpHeadersAsync_ToolHeadersOverrideAuthWithSameName()
     {
         const string headersJson = """[{"name":"Authorization","value":"Bearer custom"}]""";
         const string authenticationJson = """{"type":"bearer","apiKey":"from-auth"}""";
 
         var merged = await ToolHeadersParser.BuildMergedHttpHeadersAsync(headersJson, authenticationJson);
 
-        merged["Authorization"].Should().Be("Bearer from-auth");
+        merged["Authorization"].Should().Be("Bearer custom");
+    }
+
+    [Fact]
+    public void Parse_WithObjectFormat_ReturnsDictionary()
+    {
+        const string headersJson = """{"X-Custom":"abc","Authorization":"Bearer token"}""";
+
+        var headers = ToolHeadersParser.Parse(headersJson);
+
+        headers.Should().HaveCount(2);
+        headers["X-Custom"].Should().Be("abc");
+        headers["Authorization"].Should().Be("Bearer token");
     }
 
     [Fact]

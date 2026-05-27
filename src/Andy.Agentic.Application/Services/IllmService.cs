@@ -309,6 +309,7 @@ public class LlmService(
 
             var provider = ResolveOpenAiCompatibleRepository(agent.LlmConfig);
             var openAiTools = BuilolsFromAgent(agent);
+            var systemInstruction = AgentSystemInstructionBuilder.Build(agent);
 
             await foreach (var chunk in provider.StreamThinkingChatAsync(
                                agent.LlmConfig,
@@ -327,6 +328,7 @@ public class LlmService(
 
                                    return logs;
                                },
+                               systemInstruction,
                                cancellationToken))
             {
                 chunkCount++;

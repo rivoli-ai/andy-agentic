@@ -56,13 +56,24 @@ public class McpToolProvider(ILogger<McpToolProvider> logger, HttpClient httpCli
         string endpoint,
         string mcpType,
         Dictionary<string, object> configuration,
-        string? customHeaders,
+        string? headersFromTool,
         Dictionary<string, object> auth,
         CancellationToken cancellationToken = default)
     {
-        var httpHeaders = await ToolHeadersParser
-            .BuildMergedHttpHeadersAsync(customHeaders, auth, _httpClient, cancellationToken)
+        var toolHeaders = ToolHeadersParser.Parse(headersFromTool);
+        var httpHeaders = new Dictionary<string, string>(toolHeaders, StringComparer.OrdinalIgnoreCase);
+        var authHeaders = await ToolAuthHeaderBuilder
+            .BuildHeadersAsync(auth, _httpClient, cancellationToken)
             .ConfigureAwait(false);
+
+        foreach (var (key, value) in authHeaders)
+            httpHeaders.TryAdd(key, value);
+
+        _logger.LogDebug(
+            "MCP client headers for endpoint {Endpoint}: {HeaderCount} total ({ToolHeaderCount} from tool.Headers)",
+            endpoint,
+            httpHeaders.Count,
+            toolHeaders.Count);
 
         IClientTransport transport = McpHttpTransportHelper.IsStdio(mcpType)
             ? CreateStdioTransport(endpoint, configuration, httpHeaders)

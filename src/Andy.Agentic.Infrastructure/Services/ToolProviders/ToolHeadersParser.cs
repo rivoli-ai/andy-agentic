@@ -15,27 +15,45 @@ public static class ToolHeadersParser
 
         try
         {
-            var headerArray = JsonSerializer.Deserialize<JsonElement[]>(headersJson);
-            if (headerArray == null)
-                return result;
-
-            foreach (var item in headerArray)
-            {
-                if (item.TryGetProperty("name", out var nameElement) &&
-                    item.TryGetProperty("value", out var valueElement))
-                {
-                    var name = nameElement.GetString();
-                    if (!string.IsNullOrEmpty(name))
-                        result[name] = valueElement.GetString() ?? string.Empty;
-                }
-            }
-
-            return result;
+            using var doc = JsonDocument.Parse(headersJson);
+            return ParseRootElement(doc.RootElement);
         }
         catch (JsonException ex)
         {
             throw new ArgumentException("Invalid JSON in tool headers", nameof(headersJson), ex);
         }
+    }
+
+    private static Dictionary<string, string> ParseRootElement(JsonElement root)
+    {
+        var result = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
+        switch (root.ValueKind)
+        {
+            case JsonValueKind.Array:
+                foreach (var item in root.EnumerateArray())
+                {
+                    if (item.TryGetProperty("name", out var nameElement) &&
+                        item.TryGetProperty("value", out var valueElement))
+                    {
+                        var name = nameElement.GetString();
+                        if (!string.IsNullOrEmpty(name))
+                            result[name] = valueElement.GetString() ?? string.Empty;
+                    }
+                }
+
+                break;
+
+            case JsonValueKind.Object:
+                foreach (var property in root.EnumerateObject())
+                    result[property.Name] = property.Value.ValueKind == JsonValueKind.String
+                        ? property.Value.GetString() ?? string.Empty
+                        : property.Value.ToString();
+
+                break;
+        }
+
+        return result;
     }
 
     public static async Task<Dictionary<string, string>> BuildMergedHttpHeadersAsync(
@@ -55,13 +73,14 @@ public static class ToolHeadersParser
         HttpClient? httpClient = null,
         CancellationToken cancellationToken = default)
     {
+        // tool.Headers first; auth fills in only missing header names.
         var merged = Parse(headersJson);
         var authHeaders = await ToolAuthHeaderBuilder
             .BuildHeadersAsync(auth, httpClient, cancellationToken)
             .ConfigureAwait(false);
 
         foreach (var (key, value) in authHeaders)
-            merged[key] = value;
+            merged.TryAdd(key, value);
 
         return merged;
     }

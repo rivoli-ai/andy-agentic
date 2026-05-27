@@ -107,18 +107,18 @@ public class OpenAiRepository : ILLmProviderRepository
         var options = CreateChatOptions(config, tools);
 
 
-        var messages =  message
+        var messages = message
 
-            .Where(x=> !string.IsNullOrEmpty(x.Content) || x.ToolResults.Any())
-            .OrderBy(x=>x.Timestamp)
+            .Where(x => !string.IsNullOrEmpty(x.Content) || x.ToolResults.Any())
+            .OrderBy(x => x.Timestamp)
             .Select<ChatHistory, OpenAI.Chat.ChatMessage>(x =>
         {
-            if(x.Role =="user")
+            if (x.Role == "user")
             {
-                return new UserChatMessage(x.Content );
+                return new UserChatMessage(x.Content);
             }
 
-            return new AssistantChatMessage($"{(!string.IsNullOrEmpty(x.Content) ? $"Message : {x.Content}": string.Empty )  }\n  {string.Join('\n', x.ToolResults.Select(res => $"tool Executed : {res.ToolName} with result : {(res.Success ? res.Result?.ToString() : res.ErrorMessage)}" )) }");
+            return new AssistantChatMessage($"{(!string.IsNullOrEmpty(x.Content) ? $"Message : {x.Content}" : string.Empty)}\n  {string.Join('\n', x.ToolResults.Select(res => $"tool Executed : {res.ToolName} with result : {(res.Success ? res.Result?.ToString() : res.ErrorMessage)}"))}");
         }).ToList();
 
         var streamingResult = chatClient.CompleteChatStreamingAsync(messages, options);
@@ -173,7 +173,8 @@ public class OpenAiRepository : ILLmProviderRepository
                 Id = kv.Value.Id ?? string.Empty,
                 Function = new ToolCallFunction
                 {
-                    Name = kv.Value.Name ?? string.Empty, Arguments = kv.Value.Arguments
+                    Name = kv.Value.Name ?? string.Empty,
+                    Arguments = kv.Value.Arguments
                 }
             })
             .ToList();
@@ -208,7 +209,7 @@ public class OpenAiRepository : ILLmProviderRepository
 
         HttpResponseMessage? response = null;
         string? errorMessage = null;
-        
+
         try
         {
             using var request = new HttpRequestMessage(HttpMethod.Post, endpoint) { Content = content };
@@ -251,7 +252,13 @@ public class OpenAiRepository : ILLmProviderRepository
         IReadOnlyList<OpenAiTool>? tools = null,
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
-        await foreach (var chunk in StreamThinkingChatAsync(config, messages, tools, executeTools: null, cancellationToken))
+        await foreach (var chunk in StreamThinkingChatAsync(
+                           config,
+                           messages,
+                           tools,
+                           executeTools: null,
+                           systemInstruction: null,
+                           cancellationToken))
         {
             yield return chunk;
         }
@@ -263,9 +270,10 @@ public class OpenAiRepository : ILLmProviderRepository
         IReadOnlyList<ChatHistory> messages,
         IReadOnlyList<OpenAiTool>? tools,
         ToolCallExecutor? executeTools,
+        string? systemInstruction = null,
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
-        var conversation = ChatCompletionConversation.FromHistory(messages);
+        var conversation = ChatCompletionConversation.FromHistory(messages, systemInstruction);
         const int maxToolRounds = 8;
 
         for (var round = 0; round < maxToolRounds; round++)
@@ -412,7 +420,7 @@ public class OpenAiRepository : ILLmProviderRepository
         return new OpenAIClient(new ApiKeyCredential(config.ApiKey), clientOptions);
     }
 
-    
+
 
     /// <summary>
     /// Creates chat completion options with the specified configuration and tools.

@@ -23,7 +23,7 @@ public class LlmProviderFactory(IServiceProvider serviceProvider) : ILlmProvider
     public ILLmProviderRepository GetProvider(string provider)
     {
         var repository = _providers.FirstOrDefault(p => p.CanHandleProvider(provider));
-        
+
         if (repository == null)
         {
             var availableProviders = string.Join(", ", GetAvailableProviders());
