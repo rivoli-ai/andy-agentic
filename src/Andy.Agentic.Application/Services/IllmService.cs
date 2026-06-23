@@ -312,21 +312,24 @@ public class LlmService(
             var openAiTools = BuilolsFromAgent(agent);
             var systemInstruction = AgentSystemInstructionBuilder.Build(agent);
 
-            // Thinking-model path bypasses Semantic Kernel, so the SK skills plugin
-            // (list_skills/load_skill) is not available here. Inline the attached skills'
-            // instructions into the system prompt instead, so the model can still use them.
-            var (skillInstructions, appliedSkills) = await BuildSkillInstructionsAsync(agent, cancellationToken);
-            if (!string.IsNullOrEmpty(skillInstructions))
+            // Progressive disclosure for thinking models: only the skills' name+description go in the
+            // prompt; the model loads full instructions and bundled files on demand via load_skill /
+            // read_skill_file (advertised as tools, executed in the callback below).
+            var skills = agent.Skills.Where(s => s.IsActive && s.Registry != null).ToList();
+            if (skills.Count > 0)
             {
-                systemInstruction = string.IsNullOrWhiteSpace(systemInstruction)
-                    ? skillInstructions
-                    : $"{systemInstruction}\n\n{skillInstructions}";
+                openAiTools.AddRange(SkillToolCalling.BuildToolSchemas());
+
+                var catalog = SkillToolCalling.BuildCatalogPrompt(skills);
+                if (!string.IsNullOrEmpty(catalog))
+                {
+                    systemInstruction = string.IsNullOrWhiteSpace(systemInstruction)
+                        ? catalog
+                        : $"{systemInstruction}\n\n{catalog}";
+                }
             }
 
-            // When skills are inlined, the reply begins with a <skills-used>…</skills-used> marker
-            // naming the skills the model actually used. Buffer the leading content to parse and strip it.
-            var markerDone = appliedSkills.Count == 0;
-            var markerBuffer = new StringBuilder();
+            var loadedSkillLabels = new List<string>();
 
             await foreach (var chunk in provider.StreamThinkingChatAsync(
                                agent.LlmConfig,
@@ -334,16 +337,49 @@ public class LlmService(
                                openAiTools.Count > 0 ? openAiTools : null,
                                async (toolCalls, ct) =>
                                {
-                                   var logs = await toolExecutionService.ExecuteToolCallsAsync(
-                                       toolCalls.ToList(),
-                                       agent,
-                                       session);
-                                   foreach (var log in logs)
+                                   var results = new List<ToolExecutionLog>(toolCalls.Count);
+                                   var regular = new List<ToolCall>();
+                                   var slots = new int[toolCalls.Count];
+
+                                   // Split skill calls (handled here, on demand) from regular tool calls.
+                                   for (var i = 0; i < toolCalls.Count; i++)
                                    {
-                                       toolExecutionRecorder.Add(log);
+                                       results.Add(null!);
+                                       if (SkillToolCalling.IsSkillTool(toolCalls[i].Function.Name))
+                                       {
+                                           var (log, label) = await SkillToolCalling.ExecuteAsync(
+                                               toolCalls[i], skills, skillRegistryClient, agent.Id, session, ct);
+                                           results[i] = log;
+                                           toolExecutionRecorder.Add(log);
+                                           if (label != null && !loadedSkillLabels.Contains(label))
+                                           {
+                                               loadedSkillLabels.Add(label);
+                                           }
+                                       }
+                                       else
+                                       {
+                                           slots[regular.Count] = i;
+                                           regular.Add(toolCalls[i]);
+                                       }
                                    }
 
-                                   return logs;
+                                   if (regular.Count > 0)
+                                   {
+                                       var logs = (await toolExecutionService.ExecuteToolCallsAsync(regular, agent, session)).ToList();
+                                       for (var j = 0; j < regular.Count; j++)
+                                       {
+                                           var log = j < logs.Count ? logs[j] : new ToolExecutionLog
+                                           {
+                                               ToolName = regular[j].Function.Name,
+                                               Success = false,
+                                               Result = "Tool execution failed",
+                                           };
+                                           results[slots[j]] = log;
+                                           toolExecutionRecorder.Add(log);
+                                       }
+                                   }
+
+                                   return results;
                                },
                                systemInstruction,
                                cancellationToken))
@@ -357,53 +393,17 @@ public class LlmService(
                     continue;
                 }
 
-                if (string.IsNullOrEmpty(chunk.Content))
+                if (!string.IsNullOrEmpty(chunk.Content))
                 {
-                    continue;
-                }
-
-                contentChunkCount++;
-
-                if (markerDone)
-                {
+                    contentChunkCount++;
                     yield return new StreamingResult { Content = chunk.Content };
-                    continue;
                 }
-
-                // Still resolving the leading skills marker.
-                markerBuffer.Append(chunk.Content);
-                var state = SkillUsageMarker.TryResolveLeading(
-                    markerBuffer.ToString(), appliedSkills, out var declared, out var remainder);
-
-                if (state == SkillMarkerState.Resolved)
-                {
-                    if (declared.Count > 0)
-                    {
-                        logger.LogInformation("Model declared {Count} skill(s) used for agent {AgentId}", declared.Count, agent.Id);
-                        yield return new StreamingResult { SkillsUsed = declared };
-                    }
-
-                    markerDone = true;
-                    markerBuffer.Clear();
-                    if (!string.IsNullOrEmpty(remainder))
-                    {
-                        yield return new StreamingResult { Content = remainder };
-                    }
-                }
-                else if (state == SkillMarkerState.Absent)
-                {
-                    markerDone = true;
-                    markerBuffer.Clear();
-                    yield return new StreamingResult { Content = remainder };
-                }
-
-                // Incomplete: keep buffering until the next chunk.
             }
 
-            // Flush any leftover buffered content (e.g. an unterminated marker).
-            if (!markerDone && markerBuffer.Length > 0)
+            // Skills actually used = the ones the model loaded via load_skill (accurate by construction).
+            if (loadedSkillLabels.Count > 0)
             {
-                yield return new StreamingResult { Content = markerBuffer.ToString() };
+                yield return new StreamingResult { SkillsUsed = loadedSkillLabels };
             }
 
             logger.LogInformation(
@@ -584,68 +584,6 @@ public class LlmService(
         {
             return new TestConnectionResult { Success = false, Message = $"Connection test failed: {ex.Message}" };
         }
-    }
-
-    /// <summary>
-    ///     Builds a system-prompt section containing the full instructions of the agent's attached
-    ///     skills. Used on the thinking-model path, which bypasses Semantic Kernel and therefore
-    ///     cannot expose the SK skills plugin; the instructions are inlined instead.
-    /// </summary>
-    private async Task<(string? Instructions, List<SkillRef> Skills)> BuildSkillInstructionsAsync(Agent agent, CancellationToken cancellationToken)
-    {
-        var skills = agent.Skills.Where(s => s.IsActive && s.Registry != null).ToList();
-        if (skills.Count == 0)
-        {
-            return (null, []);
-        }
-
-        var sb = new StringBuilder();
-        sb.AppendLine("# Available skills");
-        sb.AppendLine("Follow the instructions of a skill below when the user's request matches its description.");
-
-        var applied = new List<SkillRef>();
-        foreach (var skill in skills)
-        {
-            try
-            {
-                var markdown = await skillRegistryClient.GetSkillMarkdownAsync(
-                    skill.Registry!, skill.Namespace, skill.SkillSlug, skill.Version, cancellationToken);
-
-                if (string.IsNullOrWhiteSpace(markdown))
-                {
-                    continue;
-                }
-
-                sb.AppendLine();
-                sb.AppendLine($"## Skill: {skill.DisplayName} (slug: {skill.SkillSlug})");
-                sb.AppendLine(markdown.Trim());
-                applied.Add(new SkillRef(
-                    skill.Namespace,
-                    skill.SkillSlug,
-                    skill.DisplayName,
-                    $"{skill.DisplayName} ({skill.Namespace}/{skill.SkillSlug}@{skill.Version})"));
-            }
-            catch (Exception ex)
-            {
-                logger.LogWarning(ex, "Failed to load skill {Skill} for thinking-model prompt", skill.DisplayName);
-            }
-        }
-
-        if (applied.Count == 0)
-        {
-            return (null, []);
-        }
-
-        // Ask the model to declare which skills it actually used (parsed + stripped server-side).
-        sb.AppendLine();
-        sb.AppendLine("## Skill usage reporting (required)");
-        sb.AppendLine("On the VERY FIRST line of your reply, output exactly one line naming which of the skills above you actually used, by slug, comma-separated. If you used none, output an empty list. Use this exact format and nothing else on that line:");
-        sb.AppendLine("<skills-used>slug-a, slug-b</skills-used>");
-        sb.AppendLine($"Valid slugs: {string.Join(", ", applied.Select(s => s.Slug))}");
-        sb.AppendLine("This line is removed before the user sees your reply, so do not reference it in your prose.");
-
-        logger.LogInformation("Inlined {Count} skill(s) into thinking-model prompt for agent {AgentId}", applied.Count, agent.Id);
-        return (sb.ToString().TrimEnd(), applied);
     }
 
     /// <summary>
