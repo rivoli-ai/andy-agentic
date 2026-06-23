@@ -25,7 +25,7 @@ public class ChatService(
     private const string AssistantRole = "assistant";
     private const string AgentModelName = "agent-model";
     private const string ChatCompletionObject = "chat.completion.chunk";
-    private const int DefaultTokenCountMultiplier = 1; 
+    private const int DefaultTokenCountMultiplier = 1;
 
 
     /// <summary>
@@ -58,7 +58,7 @@ public class ChatService(
             yield break;
         }
 
-        var sessionId = chatMessage.SessionId ??  await databaseResourceAccess.CreateNewChatSessionAsync(chatMessage.AgentId.Value);
+        var sessionId = chatMessage.SessionId ?? await databaseResourceAccess.CreateNewChatSessionAsync(chatMessage.AgentId.Value);
 
         // Debug: Log images count
         logger.LogInformation(
@@ -110,6 +110,7 @@ public class ChatService(
         var responseContent = new List<string?>();
         var thinkingContent = new List<string?>();
         var recorder = new ToolExecutionRecorder();
+        List<string>? skillsUsed = null;
         var outboundChunkCount = 0;
 
         await foreach (var chunk in llmResourceAccess.SendToLlmProviderStreamAsync(agent, chatRequest, sessionId, recorder, cancellationToken))
@@ -121,10 +122,15 @@ public class ChatService(
                     "SendMessageStreamRecursiveAsync cancelled: sessionId={SessionId}, chunksSent={ChunkCount}",
                     sessionId,
                     outboundChunkCount);
-                await SaveAssistantMessageAsync(agent, sessionId, responseContent, thinkingContent, recorder.Records.ToList());
+                await SaveAssistantMessageAsync(agent, sessionId, responseContent, thinkingContent, recorder.Records.ToList(), skillsUsed);
                 cancellationToken.ThrowIfCancellationRequested();
             }
-            
+
+            if (chunk.SkillsUsed is { Count: > 0 })
+            {
+                skillsUsed = chunk.SkillsUsed;
+            }
+
             if (!string.IsNullOrEmpty(chunk.Thinking))
             {
                 thinkingContent.Add(chunk.Thinking);
@@ -135,7 +141,7 @@ public class ChatService(
                 responseContent.Add(chunk.Content);
             }
 
-            if (!string.IsNullOrEmpty(chunk.Thinking) || !string.IsNullOrEmpty(chunk.Content))
+            if (!string.IsNullOrEmpty(chunk.Thinking) || !string.IsNullOrEmpty(chunk.Content) || chunk.SkillsUsed is { Count: > 0 })
             {
                 yield return chunk;
             }
@@ -149,7 +155,7 @@ public class ChatService(
             string.Concat(thinkingContent.Where(c => c != null)).Length);
 
         // Always save the message
-        await SaveAssistantMessageAsync(agent, sessionId, responseContent, thinkingContent, recorder.Records.ToList());
+        await SaveAssistantMessageAsync(agent, sessionId, responseContent, thinkingContent, recorder.Records.ToList(), skillsUsed);
 
     }
 
@@ -182,6 +188,12 @@ public class ChatService(
                 sseChunkCount++;
                 yield return CreateSseChunk(content: chunk.Content);
             }
+
+            if (chunk.SkillsUsed is { Count: > 0 })
+            {
+                sseChunkCount++;
+                yield return CreateSseChunk(skillsUsed: chunk.SkillsUsed);
+            }
         }
 
         logger.LogInformation(
@@ -190,7 +202,7 @@ public class ChatService(
             sseChunkCount);
     }
 
-    private static object CreateSseChunk(string? thinking = null, string? content = null) =>
+    private static object CreateSseChunk(string? thinking = null, string? content = null, List<string>? skillsUsed = null) =>
         new
         {
             id = $"chatcmpl-{Guid.NewGuid()}",
@@ -202,7 +214,7 @@ public class ChatService(
                 new
                 {
                     index = 0,
-                    delta = new { thinking, content },
+                    delta = new { thinking, content, skillsUsed },
                     finish_reason = (string?)null,
                 },
             },
@@ -493,7 +505,7 @@ public class ChatService(
     /// <param name="thinkingContent">The thinking content chunks.</param>
     /// <param name="toolResults"></param>
     private async Task SaveAssistantMessageAsync(Agent agent, string sessionId, List<string?> responseContent,
-        List<string?> thinkingContent, List<ToolExecutionLog> toolResults)
+        List<string?> thinkingContent, List<ToolExecutionLog> toolResults, List<string>? skillsUsed = null)
     {
         var fullResponse = string.Join("", responseContent);
         var fullThinking = string.Join("", thinkingContent);
@@ -526,7 +538,8 @@ public class ChatService(
             TokenCount = fullResponse.Length * DefaultTokenCountMultiplier,
             ToolResults = persistableExecutions,
             IsToolExecution = persistableExecutions.Any(),
-            Thinking = string.IsNullOrEmpty(fullThinking) ? null : fullThinking
+            Thinking = string.IsNullOrEmpty(fullThinking) ? null : fullThinking,
+            SkillsUsed = skillsUsed is { Count: > 0 } ? skillsUsed : null
         });
     }
 
@@ -546,8 +559,8 @@ public class ChatService(
         List<ToolCall?> toolsToCall)
     {
         var toolResults = await toolExecutionService.ExecuteToolCallsAsync(toolsToCall.Where(t => t != null).Cast<ToolCall>().ToList(), agent, sessionId);
-        
-  
+
+
         var followUpMessage = toolExecutionService.CreateFollowUpMessage(toolResults.Select(FormFollowMessage()).ToList());
 
         await foreach (var chunk in SendMessageStreamRecursiveAsync(agent, activePrompt, followUpMessage, sessionId, toolResults))
@@ -560,7 +573,7 @@ public class ChatService(
         ? $"Tool {toolResult.ToolName}: {toolResult.Result}"
         : $"Tool {toolResult.ToolName}: Error - {toolResult.ErrorMessage}";
 
-   
+
 
     /// <summary>
     /// Extracts the tool name from a tool result message.

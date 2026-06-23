@@ -27,4 +27,9 @@ public class ChatMessage
     /// List of image data (base64 encoded) attached to the message for multimodal support.
     /// </summary>
     public List<ChatImage>? Images { get; set; }
+
+    /// <summary>
+    /// Display labels of the skills applied while generating this assistant message.
+    /// </summary>
+    public List<string>? SkillsUsed { get; set; }
 }

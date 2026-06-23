@@ -27,16 +27,17 @@ public static class ServiceCollectionExtensions
         services.AddScoped<ApiToolFactory>();
         services.AddScoped<McpToolFactory>();
         services.AddScoped<DocumentRagServiceTool>();
-        
+
         // Register document export services
         services.AddScoped<ExcelExporter>();
         services.AddScoped<PdfExporter>();
         services.AddScoped<WordExporter>();
         services.AddScoped<DocumentExportFactory>();
         services.AddScoped<DocumentExportTool>();
-        
+
         services.AddScoped<NativeFunctionToolFactory>();
         services.AddScoped<IToolManager, ToolManager>();
+        services.AddScoped<SkillPluginFactory>();
         services.AddScoped<SemanticKernelBuilder>();
         services.AddHttpClient();
 

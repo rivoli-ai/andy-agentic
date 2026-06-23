@@ -32,5 +32,10 @@ public class ChatHistoryDto
     ///     List of images attached to the message for multimodal support.
     /// </summary>
     public List<ChatImageDto>? Images { get; set; }
+
+    /// <summary>
+    ///     Display labels of the skills applied while generating this assistant message.
+    /// </summary>
+    public List<string>? SkillsUsed { get; set; }
 }
 

@@ -14,6 +14,7 @@ using Andy.Agentic.Infrastructure.Repositories.Llm;
 using Andy.Agentic.Infrastructure.Semantic;
 using Andy.Agentic.Infrastructure.Semantic.Provider;
 using Andy.Agentic.Infrastructure.Services;
+using Andy.Agentic.Infrastructure.Services.SkillRegistry;
 using Andy.Agentic.Infrastructure.Services.ToolProviders;
 using Andy.Agentic.Infrastructure.DependencyInjection;
 using Andy.Agentic.Infrastructure.UnitOfWorks;
@@ -219,6 +220,7 @@ public class Startup(IConfiguration configuration)
         services.AddScoped<IDocumentRepository, DocumentRepository>();
         services.AddScoped<IAgentDocumentRepository, AgentDocumentRepository>();
         services.AddScoped<IDocumentExportRepository, DocumentExportRepository>();
+        services.AddScoped<ISkillRegistryRepository, SkillRegistryRepository>();
     }
 
     /// <summary>
@@ -264,6 +266,8 @@ public class Startup(IConfiguration configuration)
         services.AddScoped<ITagService, TagService>();
         services.AddScoped<IAgentService, AgentService>();
         services.AddScoped<IMcpService, McpService>();
+        services.AddScoped<ISkillRegistryClient, SkillRegistryClient>();
+        services.AddScoped<ISkillManager, SkillManager>();
     }
 
     /// <summary>

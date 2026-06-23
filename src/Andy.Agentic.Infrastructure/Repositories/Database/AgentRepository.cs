@@ -23,7 +23,7 @@ namespace Andy.Agentic.Infrastructure.Repositories.Database
                 Page = 1,
                 PageSize = 20,
                 AsNoTracking = false,
-                Includes = 
+                Includes =
             {
                 q => q.Include(o => o.LlmConfig),
                 q => q.Include(o => o.EmbeddingLlmConfig),
@@ -31,6 +31,7 @@ namespace Andy.Agentic.Infrastructure.Repositories.Database
                 q => q.Include(o => o.Prompts),
                 q => q.Include(o => o.Tools),
                 q => q.Include(o => o.McpServers),
+                q => q.Include(o => o.Skills).ThenInclude(s => s.Registry),
                 q => q.Include(o => o.AgentDocuments)
                     .ThenInclude(ad => ad.Document),
             }
@@ -48,7 +49,7 @@ namespace Andy.Agentic.Infrastructure.Repositories.Database
                 Page = 1,
                 PageSize = 20,
                 AsNoTracking = false,
-                Filters = {  a=>a.Id == id},
+                Filters = { a => a.Id == id },
                 Includes =
                 {
                     q => q.Include(o => o.LlmConfig),
@@ -60,6 +61,7 @@ namespace Andy.Agentic.Infrastructure.Repositories.Database
                     q => q.Include(o => o.Tools)
                         .ThenInclude(t=>t.Tool),
                     q => q.Include(o => o.McpServers),
+                    q => q.Include(o => o.Skills).ThenInclude(s => s.Registry),
                     q => q.Include(o => o.AgentDocuments)
                         .ThenInclude(ad => ad.Document),
                 }
@@ -95,7 +97,10 @@ namespace Andy.Agentic.Infrastructure.Repositories.Database
         {
             var agent = await context.Agents.FindAsync(id);
             if (agent == null)
+            {
                 return false;
+            }
+
             context.Agents.Remove(agent);
             await context.SaveChangesAsync();
             return true;
@@ -185,7 +190,7 @@ namespace Andy.Agentic.Infrastructure.Repositories.Database
         {
             return await context.Agents
                 .Include(a => a.LlmConfig)
-                .Include(a=>a.EmbeddingLlmConfig)
+                .Include(a => a.EmbeddingLlmConfig)
                 .Include(a => a.AgentTags)
                 .ThenInclude(at => at.Tag)
                 .Include(a => a.Prompts)
@@ -193,7 +198,7 @@ namespace Andy.Agentic.Infrastructure.Repositories.Database
                 .ThenInclude(at => at.Tool)
                 .Include(a => a.McpServers)
                 .Include(at => at.AgentDocuments)
-                .ThenInclude(d=>d.Document)
+                .ThenInclude(d => d.Document)
                 .Where(a => a.Id == id && (a.IsPublic || a.CreatedByUserId == userId))
                 .AsNoTracking()
                 .FirstOrDefaultAsync();

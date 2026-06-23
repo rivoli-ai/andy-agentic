@@ -30,6 +30,9 @@ public class DtosMappingRegister : IRegister
         config.NewConfig<ToolExecutionLog, ToolExecutionLogDto>().TwoWays();
         config.NewConfig<AgentTag, AgentTagDto>().TwoWays();
         config.NewConfig<AgentMcpServer, AgentMcpServerDto>().TwoWays();
+        config.NewConfig<SkillRegistry, SkillRegistryDto>().TwoWays();
+        config.NewConfig<AgentSkill, AgentSkillDto>().TwoWays();
+        config.NewConfig<SkillSearchResult, SkillSearchResultDto>().TwoWays();
         config.NewConfig<Document, DocumentDto>().TwoWays();
         config.NewConfig<AgentDocument, AgentDocumentDto>().TwoWays();
         config.NewConfig<ChatHistory, ChatHistoryDto>().TwoWays();

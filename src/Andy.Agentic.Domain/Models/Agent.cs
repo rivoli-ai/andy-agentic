@@ -108,4 +108,9 @@ public class Agent
     ///     Gets or sets the collection of documents associated with this agent.
     /// </summary>
     public virtual ICollection<AgentDocument> AgentDocuments { get; set; } = new List<AgentDocument>();
+
+    /// <summary>
+    ///     Gets or sets the collection of skills attached to this agent.
+    /// </summary>
+    public virtual ICollection<AgentSkill> Skills { get; set; } = new List<AgentSkill>();
 }

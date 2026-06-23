@@ -4,6 +4,7 @@ using Andy.Agentic.Domain.Interfaces.Llm.Semantic;
 using Andy.Agentic.Domain.Models;
 using Andy.Agentic.Domain.Models.Semantic;
 using Andy.Agentic.Infrastructure.Semantic.Interceptor;
+using Andy.Agentic.Infrastructure.Semantic.Tools;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.SemanticKernel;
@@ -22,6 +23,7 @@ public class SemanticKernelBuilder : ISemanticKernelBuilder
     private readonly IProviderDetector _providerDetector;
     private readonly IAiServiceFactory _aiServiceFactory;
     private readonly IToolManager _toolManager;
+    private readonly SkillPluginFactory _skillPluginFactory;
     private readonly ILogger<SemanticKernelBuilder>? _logger;
 
     /// <summary>
@@ -35,11 +37,13 @@ public class SemanticKernelBuilder : ISemanticKernelBuilder
             IProviderDetector providerDetector,
             IAiServiceFactory aiServiceFactory,
             IToolManager toolManager,
+            SkillPluginFactory skillPluginFactory,
             ILogger<SemanticKernelBuilder>? logger = null)
     {
         _providerDetector = providerDetector;
         _aiServiceFactory = aiServiceFactory;
         _toolManager = toolManager;
+        _skillPluginFactory = skillPluginFactory;
         _logger = logger;
     }
 
@@ -79,7 +83,7 @@ public class SemanticKernelBuilder : ISemanticKernelBuilder
         {
             try
             {
-              
+
                 _logger?.LogInformation("RAG provider added to agent thread for agent {AgentId}", query.Agent.Id);
             }
             catch (Exception ex)
@@ -87,7 +91,8 @@ public class SemanticKernelBuilder : ISemanticKernelBuilder
                 _logger?.LogWarning(ex, "Failed to add RAG provider for agent {AgentId}", query.Agent.Id);
             }
         }
-        var hastTools = query.Agent?.Tools.Any() ?? false;
+        var hasSkills = query.Agent?.Skills.Any(s => s.IsActive) ?? false;
+        var hastTools = (query.Agent?.Tools.Any() ?? false) || hasSkills;
 
         OpenAIPromptExecutionSettings? executionSettings = null;
         if (hastTools)
@@ -108,6 +113,15 @@ public class SemanticKernelBuilder : ISemanticKernelBuilder
             };
 
         var prompt = string.Join("\n", query.Agent?.Prompts.Select(p => p.Content) ?? []);
+
+        if (hasSkills && query.Agent is not null)
+        {
+            var skillCatalog = SkillPluginFactory.BuildCatalogPrompt(query.Agent);
+            if (!string.IsNullOrEmpty(skillCatalog))
+            {
+                prompt = string.IsNullOrWhiteSpace(prompt) ? skillCatalog : $"{prompt}\n\n{skillCatalog}";
+            }
+        }
 
         _logger?.LogInformation(
             "CallAgentAsync starting: agentId={AgentId}, sessionHistoryMessages={HistoryCount}, hasTools={HasTools}, promptChars={PromptLength}",
@@ -202,6 +216,9 @@ public class SemanticKernelBuilder : ISemanticKernelBuilder
             _toolManager.AddToolsAsync(kernel, agent, request.Tools);
         }
 
+        // Import the per-agent skills plugin (progressive disclosure over registry skills).
+        _skillPluginFactory.AddSkills(kernel, agent);
+
         var chatHistory = new Microsoft.SemanticKernel.ChatCompletion.ChatHistory();
 
         var lastUserMessage = request.Messages.LastOrDefault(m => m.Role == "user");
@@ -218,7 +235,7 @@ public class SemanticKernelBuilder : ISemanticKernelBuilder
                 {
                     // For Semantic Kernel, create ChatMessageContentItemCollection for multimodal support
                     var contentItems = new Microsoft.SemanticKernel.ChatCompletion.ChatMessageContentItemCollection();
-                    
+
                     // Add text content if present
                     if (!string.IsNullOrEmpty(message.Content))
                     {

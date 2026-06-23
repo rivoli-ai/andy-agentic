@@ -18,6 +18,7 @@ public class AgentsControllerTests
     private readonly Mock<IAgentService> _mockAgentService;
     private readonly Mock<IMapper> _mockMapper;
     private readonly Mock<IAuthService> _mockAuthService;
+    private readonly Mock<ISkillManager> _mockSkillManager;
     private readonly AgentsController _controller;
 
     public AgentsControllerTests()
@@ -25,7 +26,8 @@ public class AgentsControllerTests
         _mockAgentService = new Mock<IAgentService>();
         _mockMapper = new Mock<IMapper>();
         _mockAuthService = new Mock<IAuthService>();
-        _controller = new AgentsController(_mockAgentService.Object, _mockMapper.Object, _mockAuthService.Object);
+        _mockSkillManager = new Mock<ISkillManager>();
+        _controller = new AgentsController(_mockAgentService.Object, _mockMapper.Object, _mockAuthService.Object, _mockSkillManager.Object);
 
         // Setup controller context with user claims
         var claims = new List<Claim>

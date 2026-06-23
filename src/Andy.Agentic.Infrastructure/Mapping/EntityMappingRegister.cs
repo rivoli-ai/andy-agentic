@@ -29,12 +29,16 @@ public class EntityMappingRegister : IRegister
         config.NewConfig<PromptVariableEntity, PromptVariable>().TwoWays();
 
         config.NewConfig<ChatMessageEntity, ChatMessage>()
-            .Map(dest => dest.Images, src => DeserializeImages(src.Images));
+            .Map(dest => dest.Images, src => DeserializeImages(src.Images))
+            .Map(dest => dest.SkillsUsed, src => DeserializeStringList(src.SkillsUsed));
         config.NewConfig<ChatMessage, ChatMessageEntity>()
-            .Map(dest => dest.Images, src => SerializeImages(src.Images));
+            .Map(dest => dest.Images, src => SerializeImages(src.Images))
+            .Map(dest => dest.SkillsUsed, src => SerializeStringList(src.SkillsUsed));
 
         config.NewConfig<AgentToolEntity, AgentTool>().TwoWays();
         config.NewConfig<McpServerEntity, McpServer>().TwoWays();
+        config.NewConfig<SkillRegistryEntity, SkillRegistry>().TwoWays();
+        config.NewConfig<AgentSkillEntity, AgentSkill>().TwoWays();
         config.NewConfig<TagEntity, Tag>().TwoWays();
 
         config.NewConfig<ToolExecutionLogEntity, ToolExecutionLog>()
@@ -53,7 +57,8 @@ public class EntityMappingRegister : IRegister
             .Map(dest => dest.AgentId, src => src.AgentId ?? Guid.Empty)
             .Map(dest => dest.SessionId, src => src.SessionId ?? string.Empty)
             .Map(dest => dest.TokenCount, src => src.TokenCount ?? 0)
-            .Map(dest => dest.Images, src => DeserializeImages(src.Images));
+            .Map(dest => dest.Images, src => DeserializeImages(src.Images))
+            .Map(dest => dest.SkillsUsed, src => DeserializeStringList(src.SkillsUsed));
 
         config.NewConfig<ChatMessageEntity, ChatMessagePreview>();
 
@@ -98,7 +103,9 @@ public class EntityMappingRegister : IRegister
     private static Dictionary<string, object> DeserializeParameters(string? parameters)
     {
         if (string.IsNullOrEmpty(parameters))
+        {
             return new Dictionary<string, object>();
+        }
 
         try
         {
@@ -110,10 +117,46 @@ public class EntityMappingRegister : IRegister
         }
     }
 
+    private static string? SerializeStringList(List<string>? values)
+    {
+        if (values == null || values.Count == 0)
+        {
+            return null;
+        }
+
+        try
+        {
+            return JsonSerializer.Serialize(values);
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static List<string>? DeserializeStringList(string? json)
+    {
+        if (string.IsNullOrEmpty(json))
+        {
+            return null;
+        }
+
+        try
+        {
+            return JsonSerializer.Deserialize<List<string>>(json);
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
     private static string? SerializeImages(List<ChatImage>? images)
     {
         if (images == null || !images.Any())
+        {
             return null;
+        }
 
         try
         {
@@ -128,7 +171,9 @@ public class EntityMappingRegister : IRegister
     private static List<ChatImage>? DeserializeImages(string? imagesJson)
     {
         if (string.IsNullOrEmpty(imagesJson))
+        {
             return null;
+        }
 
         try
         {

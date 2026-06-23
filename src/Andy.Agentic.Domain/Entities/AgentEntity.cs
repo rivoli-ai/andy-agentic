@@ -114,4 +114,9 @@ public class AgentEntity
     ///     Collection of documents associated with this agent.
     /// </summary>
     public virtual ICollection<AgentDocumentEntity> AgentDocuments { get; set; } = new List<AgentDocumentEntity>();
+
+    /// <summary>
+    ///     Collection of skills (from configured registries) attached to this agent.
+    /// </summary>
+    public virtual ICollection<AgentSkillEntity> Skills { get; set; } = new List<AgentSkillEntity>();
 }

@@ -13,7 +13,7 @@ namespace Andy.Agentic.Infrastructure.Repositories.Database;
 /// update, delete, and paginated queries with filtering and sorting capabilities.
 /// </summary>
 /// <typeparam name="T">The type of entity this repository manages.</typeparam>
-public class EfRepository<T> : IBaseRepository<T> where T : class 
+public class EfRepository<T> : IBaseRepository<T> where T : class
 {
     private readonly DbContext _db;
 
@@ -122,12 +122,19 @@ public class EfRepository<T> : IBaseRepository<T> where T : class
     {
         var dbSet = _db.Set<T>();
 
+        // Reconcile only the explicitly-included graph. Clearing prior tracking prevents
+        // navigations loaded earlier in the request (e.g. an ownership-check read) from being
+        // treated as "existing" and wiped when the incoming entity does not carry them.
+        _db.ChangeTracker.Clear();
+
         // 1. Load existing entity with includes
         var existingEntity = await includeGraph(dbSet)
             .FirstOrDefaultAsync(matchPredicate, ct);
 
         if (existingEntity == null)
+        {
             throw new KeyNotFoundException($"{typeof(T).Name} not found");
+        }
 
         // 2. Update scalar properties
         _db.Entry(existingEntity).CurrentValues.SetValues(updatedEntity);
@@ -167,7 +174,9 @@ public class EfRepository<T> : IBaseRepository<T> where T : class
         foreach (var e in existingList)
         {
             if (!updatedList.Any(u => IsSameEntity(u, e)))
+            {
                 _db.Remove(e);
+            }
         }
 
         // Add or update

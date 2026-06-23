@@ -26,6 +26,8 @@ namespace Andy.Agentic.Infrastructure.Data
         public DbSet<DocumentEntity> Documents { get; set; }
         public DbSet<AgentDocumentEntity> AgentDocuments { get; set; }
         public DbSet<DocumentExportEntity> DocumentExports { get; set; }
+        public DbSet<SkillRegistryEntity> SkillRegistries { get; set; }
+        public DbSet<AgentSkillEntity> AgentSkills { get; set; }
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
@@ -63,7 +65,7 @@ namespace Andy.Agentic.Infrastructure.Data
 
             modelBuilder.Entity<AgentEntity>()
                 .HasOne(a => a.LlmConfig)
-                .WithMany() 
+                .WithMany()
                 .HasForeignKey(a => a.LlmConfigId);
 
             modelBuilder.Entity<AgentEntity>()
@@ -149,7 +151,7 @@ namespace Andy.Agentic.Infrastructure.Data
 
             modelBuilder.Entity<TagEntity>()
                 .Property(t => t.Id)
-                .ValueGeneratedNever(); 
+                .ValueGeneratedNever();
 
             modelBuilder.Entity<ToolEntity>()
                 .HasIndex(t => t.Name)
@@ -209,6 +211,27 @@ namespace Andy.Agentic.Infrastructure.Data
 
             modelBuilder.Entity<DocumentExportEntity>()
                 .HasIndex(de => de.FileName)
+                .IsUnique();
+
+            // Skill registry configuration
+            modelBuilder.Entity<SkillRegistryEntity>()
+                .HasIndex(r => r.Name)
+                .IsUnique();
+
+            modelBuilder.Entity<AgentSkillEntity>()
+                .HasOne(s => s.Agent)
+                .WithMany(a => a.Skills)
+                .HasForeignKey(s => s.AgentId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            modelBuilder.Entity<AgentSkillEntity>()
+                .HasOne(s => s.Registry)
+                .WithMany()
+                .HasForeignKey(s => s.SkillRegistryId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            modelBuilder.Entity<AgentSkillEntity>()
+                .HasIndex(s => new { s.AgentId, s.SkillRegistryId, s.Namespace, s.SkillSlug, s.Version })
                 .IsUnique();
 
         }

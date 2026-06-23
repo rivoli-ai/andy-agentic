@@ -3,6 +3,7 @@ using System;
 using Andy.Agentic.Infrastructure.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 
@@ -11,9 +12,11 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace Andy.Agentic.Infrastructure.Migrations
 {
     [DbContext(typeof(AndyDbContext))]
-    partial class AndyDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260622180710_AddSkillsUsedToChatMessage")]
+    partial class AddSkillsUsedToChatMessage
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder

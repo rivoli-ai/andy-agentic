@@ -43,5 +43,10 @@ public class ChatMessageDto
     ///     Images should be base64 encoded with data URI format: "data:image/jpeg;base64,..."
     /// </summary>
     public List<ChatImageDto>? Images { get; set; }
+
+    /// <summary>
+    ///     Display labels of the skills applied while generating this assistant message.
+    /// </summary>
+    public List<string>? SkillsUsed { get; set; }
 }
 

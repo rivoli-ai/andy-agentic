@@ -13,7 +13,7 @@ namespace Andy.Agentic.Controllers;
 [ApiController]
 [Route("api/[controller]")]
 [Authorize]
-public class AgentsController(IAgentService agentService, IMapper mapper, IAuthService authService) : ControllerBase
+public class AgentsController(IAgentService agentService, IMapper mapper, IAuthService authService, ISkillManager skillManager) : ControllerBase
 {
     /// <summary>
     ///     Retrieves all agents visible to the current user.
@@ -76,7 +76,7 @@ public class AgentsController(IAgentService agentService, IMapper mapper, IAuthS
     /// <param name="createAgentDto">The agent data for creation.</param>
     /// <returns>The created agent details.</returns>
     [HttpPost]
-     [Authorize(Policy = "WriteRole")]
+    [Authorize(Policy = "WriteRole")]
     public async Task<ActionResult<AgentDto>> CreateAgent([FromBody] AgentDto createAgentDto)
     {
         try
@@ -157,14 +157,18 @@ public class AgentsController(IAgentService agentService, IMapper mapper, IAuthS
 
             // Clients often omit top-level llmConfigId; nested llmConfig.id or prior row is used next.
             if (agent.LlmConfigId == Guid.Empty)
+            {
                 agent.LlmConfigId = existingAgent.LlmConfigId;
+            }
 
             // Do not reset execution metrics when the DTO carries defaults.
             agent.ExecutionCount = existingAgent.ExecutionCount;
 
             if (agent.LlmConfigId == Guid.Empty)
+            {
                 return BadRequest(new { error = "LLM configuration is required. Set llmConfigId or llmConfig.id." });
-            
+            }
+
             var updatedAgent = await agentService.UpdateAgentAsync(agent);
             return Ok(updatedAgent);
         }
@@ -185,7 +189,7 @@ public class AgentsController(IAgentService agentService, IMapper mapper, IAuthS
     /// <param name="id">The unique identifier of the agent to delete.</param>
     /// <returns>Success or error response.</returns>
     [HttpDelete("{id}")]
-     [Authorize(Policy = "WriteRole")]
+    [Authorize(Policy = "WriteRole")]
     public async Task<ActionResult> DeleteAgent(Guid id)
     {
         try
@@ -285,6 +289,68 @@ public class AgentsController(IAgentService agentService, IMapper mapper, IAuthS
     }
 
     /// <summary>
+    ///     Lists the skills attached to an agent.
+    /// </summary>
+    [HttpGet("{id}/skills")]
+    public async Task<ActionResult<IEnumerable<AgentSkillDto>>> GetAgentSkills(Guid id)
+    {
+        try
+        {
+            var skills = await skillManager.GetAgentSkillsAsync(id);
+            return Ok(mapper.Map<List<AgentSkillDto>>(skills));
+        }
+        catch (Exception ex)
+        {
+            return StatusCode(500, new { error = "Internal server error", message = ex.Message });
+        }
+    }
+
+    /// <summary>
+    ///     Attaches a skill (namespace/skill@version) from a registry to an agent.
+    /// </summary>
+    [HttpPost("{id}/skills")]
+    [Authorize(Policy = "WriteRole")]
+    public async Task<ActionResult<AgentSkillDto>> AttachSkill(Guid id, [FromBody] AgentSkillDto dto)
+    {
+        try
+        {
+            if (!ModelState.IsValid)
+            {
+                return BadRequest(ModelState);
+            }
+
+            var attached = await skillManager.AttachSkillAsync(id, mapper.Map<AgentSkill>(dto));
+            return Ok(mapper.Map<AgentSkillDto>(attached));
+        }
+        catch (KeyNotFoundException ex)
+        {
+            return NotFound(new { error = ex.Message });
+        }
+        catch (Exception ex)
+        {
+            return StatusCode(500, new { error = "Internal server error", message = ex.Message });
+        }
+    }
+
+    /// <summary>
+    ///     Detaches a skill from an agent.
+    /// </summary>
+    [HttpDelete("{id}/skills/{skillId}")]
+    [Authorize(Policy = "WriteRole")]
+    public async Task<IActionResult> DetachSkill(Guid id, Guid skillId)
+    {
+        try
+        {
+            var detached = await skillManager.DetachSkillAsync(id, skillId);
+            return detached ? NoContent() : NotFound(new { error = "Attached skill not found" });
+        }
+        catch (Exception ex)
+        {
+            return StatusCode(500, new { error = "Internal server error", message = ex.Message });
+        }
+    }
+
+    /// <summary>
     /// UIs often send only <c>llmConfig.id</c> / <c>embeddingLlmConfig.id</c> while leaving flat FK properties default.
     /// </summary>
     private static void ApplyLlmConfigIdsFromDto(Agent agent, AgentDto dto)
@@ -295,7 +361,9 @@ public class AgentsController(IAgentService agentService, IMapper mapper, IAuthS
                 ? lid
                 : (Guid?)null;
         if (agent.LlmConfigId == Guid.Empty && chatId is { } cid)
+        {
             agent.LlmConfigId = cid;
+        }
 
         var embedId = dto.EmbeddingLlmConfig?.Id is Guid dtoEmb && dtoEmb != Guid.Empty
             ? dtoEmb
@@ -304,6 +372,8 @@ public class AgentsController(IAgentService agentService, IMapper mapper, IAuthS
                 : (Guid?)null;
         if ((!agent.EmbeddingLlmConfigId.HasValue || agent.EmbeddingLlmConfigId == Guid.Empty) &&
             embedId is { } e)
+        {
             agent.EmbeddingLlmConfigId = e;
+        }
     }
 }

@@ -24,6 +24,7 @@ public class LlmService(
     IMapper mapper,
     ISemanticKernelBuilder semenSemanticKernelBuilder,
     IToolExecutionService toolExecutionService,
+    ISkillRegistryClient skillRegistryClient,
     ILogger<LlmService> logger) : ILlmService
 {
     /// <summary>
@@ -209,7 +210,7 @@ public class LlmService(
         List<ChatImage>? images = null)
     {
         var allTools = BuilolsFromAgent(agent);
-        
+
         var tools = agent.Tools.Select(at => at.Tool).ToList();
 
         logger.LogInformation(
@@ -311,6 +312,22 @@ public class LlmService(
             var openAiTools = BuilolsFromAgent(agent);
             var systemInstruction = AgentSystemInstructionBuilder.Build(agent);
 
+            // Thinking-model path bypasses Semantic Kernel, so the SK skills plugin
+            // (list_skills/load_skill) is not available here. Inline the attached skills'
+            // instructions into the system prompt instead, so the model can still use them.
+            var (skillInstructions, appliedSkills) = await BuildSkillInstructionsAsync(agent, cancellationToken);
+            if (!string.IsNullOrEmpty(skillInstructions))
+            {
+                systemInstruction = string.IsNullOrWhiteSpace(systemInstruction)
+                    ? skillInstructions
+                    : $"{systemInstruction}\n\n{skillInstructions}";
+            }
+
+            // When skills are inlined, the reply begins with a <skills-used>…</skills-used> marker
+            // naming the skills the model actually used. Buffer the leading content to parse and strip it.
+            var markerDone = appliedSkills.Count == 0;
+            var markerBuffer = new StringBuilder();
+
             await foreach (var chunk in provider.StreamThinkingChatAsync(
                                agent.LlmConfig,
                                request.Messages,
@@ -332,27 +349,61 @@ public class LlmService(
                                cancellationToken))
             {
                 chunkCount++;
+
                 if (!string.IsNullOrEmpty(chunk.Thinking))
                 {
                     thinkingChunkCount++;
+                    yield return new StreamingResult { Thinking = chunk.Thinking };
+                    continue;
                 }
 
-                if (!string.IsNullOrEmpty(chunk.Content))
+                if (string.IsNullOrEmpty(chunk.Content))
                 {
-                    contentChunkCount++;
-                    if (contentChunkCount == 1)
+                    continue;
+                }
+
+                contentChunkCount++;
+
+                if (markerDone)
+                {
+                    yield return new StreamingResult { Content = chunk.Content };
+                    continue;
+                }
+
+                // Still resolving the leading skills marker.
+                markerBuffer.Append(chunk.Content);
+                var state = SkillUsageMarker.TryResolveLeading(
+                    markerBuffer.ToString(), appliedSkills, out var declared, out var remainder);
+
+                if (state == SkillMarkerState.Resolved)
+                {
+                    if (declared.Count > 0)
                     {
-                        logger.LogInformation(
-                            "SendToLlmProviderStream first content chunk #{ChunkIndex}, length={Length}",
-                            chunkCount,
-                            chunk.Content.Length);
+                        logger.LogInformation("Model declared {Count} skill(s) used for agent {AgentId}", declared.Count, agent.Id);
+                        yield return new StreamingResult { SkillsUsed = declared };
+                    }
+
+                    markerDone = true;
+                    markerBuffer.Clear();
+                    if (!string.IsNullOrEmpty(remainder))
+                    {
+                        yield return new StreamingResult { Content = remainder };
                     }
                 }
-
-                if (!string.IsNullOrEmpty(chunk.Thinking) || !string.IsNullOrEmpty(chunk.Content))
+                else if (state == SkillMarkerState.Absent)
                 {
-                    yield return chunk;
+                    markerDone = true;
+                    markerBuffer.Clear();
+                    yield return new StreamingResult { Content = remainder };
                 }
+
+                // Incomplete: keep buffering until the next chunk.
+            }
+
+            // Flush any leftover buffered content (e.g. an unterminated marker).
+            if (!markerDone && markerBuffer.Length > 0)
+            {
+                yield return new StreamingResult { Content = markerBuffer.ToString() };
             }
 
             logger.LogInformation(
@@ -430,7 +481,7 @@ public class LlmService(
             using var httpClient = new HttpClient();
             httpClient.Timeout = TimeSpan.FromSeconds(10);
 
-            if (testConnection.Provider == LLMProviderType.OpenAi || 
+            if (testConnection.Provider == LLMProviderType.OpenAi ||
                 testConnection.Provider == LLMProviderType.Custom ||
                 testConnection.Provider == LLMProviderType.AzureOpenAi)
             {
@@ -457,7 +508,9 @@ public class LlmService(
                 {
                     return new TestConnectionResult
                     {
-                        Success = true, Message = "Connection successful", Latency = latency
+                        Success = true,
+                        Message = "Connection successful",
+                        Latency = latency
                     };
                 }
 
@@ -489,7 +542,9 @@ public class LlmService(
                 {
                     return new TestConnectionResult
                     {
-                        Success = true, Message = "Connection successful", Latency = latency
+                        Success = true,
+                        Message = "Connection successful",
+                        Latency = latency
                     };
                 }
 
@@ -511,7 +566,9 @@ public class LlmService(
                 {
                     return new TestConnectionResult
                     {
-                        Success = true, Message = "Endpoint is reachable", Latency = latency
+                        Success = true,
+                        Message = "Endpoint is reachable",
+                        Latency = latency
                     };
                 }
 
@@ -527,6 +584,68 @@ public class LlmService(
         {
             return new TestConnectionResult { Success = false, Message = $"Connection test failed: {ex.Message}" };
         }
+    }
+
+    /// <summary>
+    ///     Builds a system-prompt section containing the full instructions of the agent's attached
+    ///     skills. Used on the thinking-model path, which bypasses Semantic Kernel and therefore
+    ///     cannot expose the SK skills plugin; the instructions are inlined instead.
+    /// </summary>
+    private async Task<(string? Instructions, List<SkillRef> Skills)> BuildSkillInstructionsAsync(Agent agent, CancellationToken cancellationToken)
+    {
+        var skills = agent.Skills.Where(s => s.IsActive && s.Registry != null).ToList();
+        if (skills.Count == 0)
+        {
+            return (null, []);
+        }
+
+        var sb = new StringBuilder();
+        sb.AppendLine("# Available skills");
+        sb.AppendLine("Follow the instructions of a skill below when the user's request matches its description.");
+
+        var applied = new List<SkillRef>();
+        foreach (var skill in skills)
+        {
+            try
+            {
+                var markdown = await skillRegistryClient.GetSkillMarkdownAsync(
+                    skill.Registry!, skill.Namespace, skill.SkillSlug, skill.Version, cancellationToken);
+
+                if (string.IsNullOrWhiteSpace(markdown))
+                {
+                    continue;
+                }
+
+                sb.AppendLine();
+                sb.AppendLine($"## Skill: {skill.DisplayName} (slug: {skill.SkillSlug})");
+                sb.AppendLine(markdown.Trim());
+                applied.Add(new SkillRef(
+                    skill.Namespace,
+                    skill.SkillSlug,
+                    skill.DisplayName,
+                    $"{skill.DisplayName} ({skill.Namespace}/{skill.SkillSlug}@{skill.Version})"));
+            }
+            catch (Exception ex)
+            {
+                logger.LogWarning(ex, "Failed to load skill {Skill} for thinking-model prompt", skill.DisplayName);
+            }
+        }
+
+        if (applied.Count == 0)
+        {
+            return (null, []);
+        }
+
+        // Ask the model to declare which skills it actually used (parsed + stripped server-side).
+        sb.AppendLine();
+        sb.AppendLine("## Skill usage reporting (required)");
+        sb.AppendLine("On the VERY FIRST line of your reply, output exactly one line naming which of the skills above you actually used, by slug, comma-separated. If you used none, output an empty list. Use this exact format and nothing else on that line:");
+        sb.AppendLine("<skills-used>slug-a, slug-b</skills-used>");
+        sb.AppendLine($"Valid slugs: {string.Join(", ", applied.Select(s => s.Slug))}");
+        sb.AppendLine("This line is removed before the user sees your reply, so do not reference it in your prose.");
+
+        logger.LogInformation("Inlined {Count} skill(s) into thinking-model prompt for agent {AgentId}", applied.Count, agent.Id);
+        return (sb.ToString().TrimEnd(), applied);
     }
 
     /// <summary>
@@ -589,8 +708,8 @@ public class LlmService(
         }
 
         // Filter out tools that were executed and succeeded
-        var filteredTools = allTools.Where(tool => 
-            tool.Function != null && 
+        var filteredTools = allTools.Where(tool =>
+            tool.Function != null &&
             !executedAndSucceededTools.Contains(tool.Function.Name)
         ).ToList();
 
@@ -636,13 +755,17 @@ public class LlmService(
     public void ParseAndAdolParameters(AgentTool tool, OpenAiTool toolFunction)
     {
         if (string.IsNullOrEmpty(tool.Tool.Parameters))
+        {
             return;
+        }
 
         try
         {
             var array = JsonSerializer.Deserialize<JsonElement[]>(tool.Tool.Parameters);
             if (array == null)
+            {
                 return;
+            }
 
             var requiredParams = new List<string>();
 

@@ -99,4 +99,10 @@ public class ChatMessageEntity
     ///     Stored as JSON string containing array of ChatImage objects.
     /// </summary>
     public string? Images { get; set; }
+
+    /// <summary>
+    ///     Display labels of the skills applied while generating this assistant message.
+    ///     Stored as a JSON string array.
+    /// </summary>
+    public string? SkillsUsed { get; set; }
 }
