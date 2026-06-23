@@ -1,0 +1,12 @@
+{
+  "name": "Test API Tool with Headers",
+  "description": "A test tool that demonstrates headers functionality",
+  "type": "api",
+  "category": "Testing",
+  "isActive": true,
+  "configuration": "{\"endpoint\": \"https://api.example.com/test\", \"timeout\": 30000}",
+  "authentication": "{\"type\": \"api_key\", \"apiKey\": \"test-key-123\", \"required\": true}",
+  "parameters": "[{\"name\": \"query\", \"type\": \"string\", \"required\": true, \"description\": \"Search query\"}, {\"name\": \"limit\", \"type\": \"number\", \"required\": false, \"default\": 10, \"description\": \"Number of results to return\"}]",
+  "headers": "[{\"name\": \"Content-Type\", \"value\": \"application/json\", \"required\": true, \"description\": \"Request content type\"}, {\"name\": \"Accept\", \"value\": \"application/json\", \"required\": true, \"description\": \"Response format\"}, {\"name\": \"User-Agent\", \"value\": \"Andy-Agentic/1.0\", \"required\": false, \"description\": \"Client identification\"}]"
+}
+

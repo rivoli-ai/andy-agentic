@@ -1,47 +1,29 @@
+using Andy.Agentic;
+
 var builder = WebApplication.CreateBuilder(args);
 
-// Add services to the container.
-builder.Services.AddControllers();
-// Learn more about configuring Swagger/OpenAPI at https://aka.ms/aspnetcore/swashbuckle
-builder.Services.AddEndpointsApiExplorer();
-builder.Services.AddSwaggerGen();
+builder.WebHost.ConfigureKestrel(serverOptions =>
+{
+    serverOptions.ListenAnyIP(80);
+
+    try
+    {
+        serverOptions.ListenAnyIP(443, configure => configure.UseHttps());
+    }
+    catch (InvalidOperationException)
+    {
+        Console.WriteLine("Warning: HTTPS not configured - no valid certificate found. Running HTTP only.");
+    }
+});
+
+var startup = new Startup(builder.Configuration);
+
+#pragma warning disable SKEXP0001 // Le type est utilisé à des fins d'évaluation uniquement et est susceptible d'être modifié ou supprimé dans les futures mises à jour. Supprimez ce diagnostic pour continuer.
+startup.ConfigureApplicationServices(builder.Services);
+#pragma warning restore SKEXP0001 // Le type est utilisé à des fins d'évaluation uniquement et est susceptible d'être modifié ou supprimé dans les futures mises à jour. Supprimez ce diagnostic pour continuer.
 
 var app = builder.Build();
 
-// Configure the HTTP request pipeline.
-if (app.Environment.IsDevelopment())
-{
-    app.UseSwagger();
-    app.UseSwaggerUI();
-}
-
-app.UseHttpsRedirection();
-
-app.MapControllers();
-
-var summaries = new[]
-{
-    "Freezing", "Bracing", "Chilly", "Cool", "Mild", "Warm", "Balmy", "Hot", "Sweltering", "Scorching"
-};
-
-app.MapGet("/weatherforecast", () =>
-{
-    var forecast =  Enumerable.Range(1, 5).Select(index =>
-        new WeatherForecast
-        (
-            DateOnly.FromDateTime(DateTime.Now.AddDays(index)),
-            Random.Shared.Next(-20, 55),
-            summaries[Random.Shared.Next(summaries.Length)]
-        ))
-        .ToArray();
-    return forecast;
-})
-.WithName("GetWeatherForecast")
-.WithOpenApi();
+startup.ConfigureApplication(app);
 
 app.Run();
-
-record WeatherForecast(DateOnly Date, int TemperatureC, string? Summary)
-{
-    public int TemperatureF => 32 + (int)(TemperatureC / 0.5556);
-}

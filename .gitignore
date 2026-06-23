@@ -33,6 +33,8 @@ ScaffoldingReadMe.txt
 
 # NuGet Packages
 *.nupkg
+# Local HTTP cache override (e.g. when ~/.local/share/NuGet/http-cache is not writable)
+.nuget-http-cache/
 # NuGet Symbol Packages
 *.snupkg
 
@@ -73,3 +75,4 @@ container/rootfs-safe/
 *.VisualState.xml
 TestResult.xml
 nunit-*.xml
+/.vs

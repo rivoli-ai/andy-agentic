@@ -1,0 +1,31 @@
+using Andy.Agentic.Domain.Models;
+
+public class ChatHistory
+{
+    public Guid Id { get; set; }
+    public string Content { get; set; } = string.Empty;
+    public string Role { get; set; } = string.Empty; // "user" or "assistant"
+    public string AgentName { get; set; } = string.Empty;
+    public DateTime Timestamp { get; set; }
+    public Guid AgentId { get; set; }
+    public string SessionId { get; set; } = string.Empty;
+    public int TokenCount { get; set; }
+    public bool IsToolExecution { get; set; }
+    public string? ToolName { get; set; }
+    public string? ToolResult { get; set; }
+    public Guid? UserId { get; set; }
+
+    public List<ToolExecutionLog> ToolResults { get; set; } = new();
+
+    public string? Thinking { get; set; }
+
+    /// <summary>
+    /// List of images attached to the message for multimodal support.
+    /// </summary>
+    public List<ChatImage>? Images { get; set; }
+
+    /// <summary>
+    /// Display labels of the skills applied while generating this assistant message.
+    /// </summary>
+    public List<string>? SkillsUsed { get; set; }
+}

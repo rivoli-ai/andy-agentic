@@ -1,0 +1,2279 @@
+diff --git a/src/Andy.Agentic.Application/Interfaces/ILlmService.cs b/src/Andy.Agentic.Application/Interfaces/ILlmService.cs
+index 9402f04..551543f 100644
+--- a/src/Andy.Agentic.Application/Interfaces/ILlmService.cs
++++ b/src/Andy.Agentic.Application/Interfaces/ILlmService.cs
+@@ -16,5 16,9 @@ public interface ILlmService
+ 
+     Task<LlmRequest> PrepareLlmMessageAsync(Agent agent, Prompt prompt,
+         string userMessage, string sessionId, List<ChatHistory> getChatHistoryFunc);
+-    IAsyncEnumerable<StreamingResult> SendToLlmProviderStreamAsync(LlmConfig llmConfig, LlmRequest request);
+    IAsyncEnumerable<StreamingResult> SendToLlmProviderStreamAsync(
+        Agent agent,
+        LlmRequest request,
+        string session,
+        ToolExecutionRecorder toolExecutionRecorder);
+ }
+diff --git a/src/Andy.Agentic.Application/Services/ChatService.cs b/src/Andy.Agentic.Application/Services/ChatService.cs
+index 99acee9..4ac8836 100644
+--- a/src/Andy.Agentic.Application/Services/ChatService.cs
++++ b/src/Andy.Agentic.Application/Services/ChatService.cs
+@@ -85,30 85,18 @@ public class ChatService(
+             recentMessages.ToList());
+ 
+         var responseContent = new List<string?>();
+-        var toolsToCall = new List<ToolCall?>();
+ 
+-        await foreach (var chunk in llmResourceAccess.SendToLlmProviderStreamAsync( agent.LlmConfig!, chatRequest))
+        var recorder = new ToolExecutionRecorder();
+
+        await foreach (var chunk in llmResourceAccess.SendToLlmProviderStreamAsync(agent, chatRequest, sessionId, recorder))
+         {
+             responseContent.Add(chunk.Content);
+ 
+-            if (chunk.ToolCalls != null)
+-            {
+-                toolsToCall.AddRange(chunk.ToolCalls);
+-            }
+             yield return chunk.Content!;
+         }
+ 
+-        await SaveAssistantMessageAsync(agent, sessionId, responseContent, toolResults ?? new List<ToolExecutionLog>());
+-
+-        if (!toolsToCall.Any())
+-        {
+-            yield break;
+-        }
+        await SaveAssistantMessageAsync(agent, sessionId, responseContent, recorder.Records.ToList());
+ 
+-        await foreach (var chunk in ProcessToolCallsAsync(agent, activePrompt, sessionId, toolsToCall, chatRequest))
+-        {
+-            yield return chunk;
+-        }
+     }
+ 
+     /// <summary>
+diff --git a/src/Andy.Agentic.Application/Services/IllmService.cs b/src/Andy.Agentic.Application/Services/IllmService.cs
+index b05fdc2..33f3f49 100644
+--- a/src/Andy.Agentic.Application/Services/IllmService.cs
++++ b/src/Andy.Agentic.Application/Services/IllmService.cs
+@@ -5,8 5,10 @@ using Andy.Agentic.Domain.Entities;
+ using Andy.Agentic.Domain.Interfaces;
+ using Andy.Agentic.Domain.Interfaces.Database;
+ using Andy.Agentic.Domain.Interfaces.Llm;
+using Andy.Agentic.Domain.Interfaces.Llm.Semantic;
+ using Andy.Agentic.Domain.Models;
+ using AutoMapper;
+using Microsoft.SemanticKernel;
+ 
+ namespace Andy.Agentic.Application.Services;
+ 
+@@ -14,7 16,7 @@ namespace Andy.Agentic.Application.Services;
+ ///     Service for managing Large Language Model (LLM) configurations, providers, and interactions.
+ ///     Handles CRUD operations for LLM configs, provider information, and message processing.
+ /// </summary>
+-public class LlmService(ILlmRepository llmRepository, ILlmProviderFactory providerFactory, IMapper mapper) : ILlmService
+public class LlmService(ILlmRepository llmRepository, ILlmProviderFactory providerFactory, IMapper mapper, ISemanticKernelBuilder semenSemanticKernelBuilder) : ILlmService
+ {
+     /// <summary>
+     ///     Retrieves all LLM configurations from the repository.
+@@ -200,7 202,7 @@ public class LlmService(ILlmRepository llmRepository, ILlmProviderFactory provid
+         Console.WriteLine($"Total Tools Available: {allTools.Count}");
+         Console.WriteLine($"Tools After Filtering: {filteredTools.Count}");
+ 
+-        return  new LlmRequest {Messages = recentMessages, Tools = filteredTools};
+        return  new LlmRequest {Messages = recentMessages, Tools = agent .Tools.Select(x=>x.Tool).ToList()};
+     }
+ 
+     /// <summary>
+@@ -211,16 213,21 @@ public class LlmService(ILlmRepository llmRepository, ILlmProviderFactory provid
+     /// <param name="tools">Optional list of tools available to the LLM.</param>
+     /// <param name="toolCalls">Optional list of previous tool calls for context.</param>
+     /// <returns>An async enumerable of response chunks from the LLM provider.</returns>
+-    public async IAsyncEnumerable<StreamingResult> SendToLlmProviderStreamAsync(LlmConfig llmConfig, LlmRequest request)
+    public async IAsyncEnumerable<StreamingResult> SendToLlmProviderStreamAsync(Agent agent,
+        LlmRequest request,
+        string session, 
+        ToolExecutionRecorder toolExecutionRecorder)
+     {
+-        var provider = providerFactory.GetProvider(llmConfig.Provider);
+ 
+-        var config = mapper.Map<LlmConfig>(llmConfig);
+        var kernel = semenSemanticKernelBuilder.BuildKernelAsync(agent,session, agent.LlmConfig, request, toolExecutionRecorder);
+ 
+-      
+-        await foreach (var chunk in provider.StreamChatWithTools(config, request.Messages, request.Tools))
+        await foreach (var chunk in semenSemanticKernelBuilder.CallAgentAsync(kernel))
+        {
+            yield return new StreamingResult
+             {
+-            yield return chunk!;
+                Content = chunk.Content,
+            }!;
+
+         }
+ 
+     }
+diff --git a/src/Andy.Agentic.Application/Services/ToolExecutionService.cs b/src/Andy.Agentic.Application/Services/ToolExecutionService.cs
+index 5f5e8fb..701d21a 100644
+--- a/src/Andy.Agentic.Application/Services/ToolExecutionService.cs
++++ b/src/Andy.Agentic.Application/Services/ToolExecutionService.cs
+@@ -1,4 1,5 @@
+ using System.Diagnostics;
+using System.Globalization;
+ using System.Text.Json;
+ using Andy.Agentic.Application.Interfaces;
+ using Andy.Agentic.Domain.Interfaces;
+@@ -165,17 166,26 @@ public class ToolExecutionService(
+     /// </summary>
+     /// <param name="arguments">The JSON string containing tool arguments.</param>
+     /// <returns>A dictionary of argument names and values; empty if parsing fails.</returns>
+-    public Dictionary<string, object> ParseToolCallArguments(string arguments)
+
+
+    public static Dictionary<string, object> ParseToolCallArguments(string arguments)
+     {
+         try
+         {
+-            if (string.IsNullOrEmpty(arguments))
+            if (string.IsNullOrWhiteSpace(arguments))
+                return new Dictionary<string, object>();
+
+            using var doc = JsonDocument.Parse(arguments, new JsonDocumentOptions
+             {
+                AllowTrailingCommas = true,
+                CommentHandling = JsonCommentHandling.Skip
+            });
+
+            // Expecting an object at the root. If not, you can choose to wrap or return {}.
+            if (doc.RootElement.ValueKind != JsonValueKind.Object)
+                 return new Dictionary<string, object>();
+-            }
+ 
+-            var parsedParams = JsonSerializer.Deserialize<Dictionary<string, object>>(arguments);
+-            return parsedParams ?? new Dictionary<string, object>();
+            return (Dictionary<string, object>)ConvertElement(doc.RootElement)!;
+         }
+         catch
+         {
+@@ -183,6 193,87 @@ public class ToolExecutionService(
+         }
+     }
+ 
+    private static object? ConvertElement(JsonElement el)
+    {
+        switch (el.ValueKind)
+        {
+            case JsonValueKind.Null:
+            case JsonValueKind.Undefined:
+                return null;
+
+            case JsonValueKind.True:
+            case JsonValueKind.False:
+                return el.GetBoolean();
+
+            case JsonValueKind.Number:
+                if (el.TryGetInt64(out var l))
+                    return l;
+                if (el.TryGetDecimal(out var dec))
+                    return dec;
+                return el.GetDouble();
+
+            case JsonValueKind.String:
+            {
+                var s = el.GetString();
+                if (s is null)
+                    return null;
+
+                // 1) Try boolean
+                if (bool.TryParse(s, out var b))
+                    return b;
+
+                // 2) Try integer
+                if (long.TryParse(s, NumberStyles.Integer, CultureInfo.InvariantCulture, out var l2))
+                    return l2;
+
+                // 3) Try decimal/double
+                if (decimal.TryParse(s, NumberStyles.Number, CultureInfo.InvariantCulture, out var d2))
+                    return d2;
+
+                // 4) If the string looks like JSON (object/array), try to parse it as JSON and convert recursively
+                var trimmed = s.Trim();
+                if (IsLikelyJson(trimmed))
+                {
+                    try
+                    {
+                        using var innerDoc = JsonDocument.Parse(trimmed);
+                        return ConvertElement(innerDoc.RootElement);
+                    }
+                    catch
+                    {
+                        // fall through to returning the original string if parsing fails
+                    }
+                }
+
+                // Otherwise, keep as plain string
+                return s;
+            }
+
+            case JsonValueKind.Array:
+            {
+                var list = new List<object?>();
+                foreach (var item in el.EnumerateArray())
+                    list.Add(ConvertElement(item));
+                return list;
+            }
+
+            case JsonValueKind.Object:
+            {
+                var dict = new Dictionary<string, object>(StringComparer.Ordinal);
+                foreach (var prop in el.EnumerateObject())
+                    dict[prop.Name] = ConvertElement(prop.Value)!;
+                return dict;
+            }
+
+            default:
+                return null;
+        }
+    }
+
+    private static bool IsLikelyJson(string s)
+        => s.Length >= 2 && ((s[0] == '{' && s[^1] == '}') || (s[0] == '[' && s[^1] == ']'));
+
+
+     /// <summary>
+     ///     Creates an error response  for tool execution failures.
+     /// </summary>
+diff --git a/src/Andy.Agentic.Domain/Andy.Agentic.Domain.csproj b/src/Andy.Agentic.Domain/Andy.Agentic.Domain.csproj
+index 53f6174..d5a3eb9 100644
+--- a/src/Andy.Agentic.Domain/Andy.Agentic.Domain.csproj
++++ b/src/Andy.Agentic.Domain/Andy.Agentic.Domain.csproj
+@@ -15,6 15,10 @@
+     <Folder Include="Specifications\" />
+   </ItemGroup>
+ 
+  <ItemGroup>
+    <PackageReference Include="Microsoft.SemanticKernel.Abstractions" Version="1.65.0" />
+  </ItemGroup>
+
+   <ItemGroup>
+     <Reference Include="Microsoft.AspNetCore.Authentication.OAuth">
+       <HintPath>..\..\..\..\Program Files\dotnet\packs\Microsoft.AspNetCore.App.Ref\9.0.8\ref\net9.0\Microsoft.AspNetCore.Authentication.OAuth.dll</HintPath>
+diff --git a/src/Andy.Agentic.Domain/Interfaces/Llm/Semantic/IAIServiceFactory.cs b/src/Andy.Agentic.Domain/Interfaces/Llm/Semantic/IAIServiceFactory.cs
+new file mode 100644
+index 0000000..c19b083
+--- /dev/null
++++ b/src/Andy.Agentic.Domain/Interfaces/Llm/Semantic/IAIServiceFactory.cs
+@@ -0,0 1,15 @@
+using Andy.Agentic.Domain.Models;
+using Andy.Agentic.Domain.Models.Semantic;
+using Microsoft.SemanticKernel;
+
+namespace Andy.Agentic.Domain.Interfaces.Llm.Semantic;
+
++/// <summary>
++/// Defines a factory interface for creating instances of AI services.
++/// </summary>
+public interface IAiServiceFactory
++{
+    /// <summary>
+    /// Adds an AI service to the specified kernel builder with the given configuration and provider.
+    /// </summary>
+    /// <param name="builder">The kernel builder to which the AI service will be added.</param>
+    /// <param name="config">The configuration settings for the AI service.</param>
+    /// <param name="provider">The provider of the AI service.</param>
+    void AddAiService(IKernelBuilder builder, LlmConfig config, AiProvider provider);
+}
+\ No newline at end of file
+diff --git a/src/Andy.Agentic.Domain/Interfaces/Llm/Semantic/IProviderDetector.cs b/src/Andy.Agentic.Domain/Interfaces/Llm/Semantic/IProviderDetector.cs
+new file mode 100644
+index 0000000..583cfaf
+--- /dev/null
++++ b/src/Andy.Agentic.Domain/Interfaces/Llm/Semantic/IProviderDetector.cs
+@@ -0,0 1,13 @@
+using Andy.Agentic.Domain.Models;
+using Andy.Agentic.Domain.Models.Semantic;
+
+namespace Andy.Agentic.Domain.Interfaces.Llm.Semantic;
+
++/// <summary>
++/// Interface for detecting and providing information about various providers.
++/// </summary>
+public interface IProviderDetector
++{
+    /// <summary>
+    /// Detects and returns the appropriate AI provider based on the given kernel configuration.
+    /// </summary>
+    /// <param name="config">The kernel configuration used to determine the AI provider.</param>
+    /// <returns>The detected AI provider.</returns>
+    AiProvider DetectProvider(LlmConfig config);
+}
+\ No newline at end of file
+diff --git a/src/Andy.Agentic.Domain/Interfaces/Llm/Semantic/ISemanticKernelBuilder.cs b/src/Andy.Agentic.Domain/Interfaces/Llm/Semantic/ISemanticKernelBuilder.cs
+new file mode 100644
+index 0000000..154f6ee
+--- /dev/null
++++ b/src/Andy.Agentic.Domain/Interfaces/Llm/Semantic/ISemanticKernelBuilder.cs
+@@ -0,0 1,15 @@
+using Andy.Agentic.Domain.Models;
+using Andy.Agentic.Domain.Models.Semantic;
+using Microsoft.SemanticKernel;
+
+namespace Andy.Agentic.Domain.Interfaces.Llm.Semantic;
+
+public interface ISemanticKernelBuilder
++{
+    IAsyncEnumerable<StreamingChatMessageContent> CallAgentAsync(KernelResponse kernel);
+    KernelResponse BuildKernelAsync(Agent agent,
+        string session,
+        LlmConfig config,
+        LlmRequest request,
+        ToolExecutionRecorder toolExecutionRecorder);
++}
+diff --git a/src/Andy.Agentic.Domain/Interfaces/Llm/Semantic/IToolFactory.cs b/src/Andy.Agentic.Domain/Interfaces/Llm/Semantic/IToolFactory.cs
+new file mode 100644
+index 0000000..434393e
+--- /dev/null
++++ b/src/Andy.Agentic.Domain/Interfaces/Llm/Semantic/IToolFactory.cs
+@@ -0,0 1,13 @@
+using Andy.Agentic.Domain.Models;
+using Microsoft.SemanticKernel;
+
+namespace Andy.Agentic.Domain.Interfaces.Llm.Semantic;
+
++/// <summary>
++/// Interface for a factory that creates tool instances.
++/// </summary>
+public interface IToolFactory
++{
+    /// <summary>
+    /// Asynchronously creates a tool based on the provided configuration.
+    /// </summary>
+    /// <param name="config">The configuration settings for the tool.</param>
+    /// <returns>A task representing the asynchronous operation, containing the created kernel function.</returns>
+    KernelFunction CreateToolAsync(Tool config);
+}
+\ No newline at end of file
+diff --git a/src/Andy.Agentic.Domain/Interfaces/Llm/Semantic/IToolManager.cs b/src/Andy.Agentic.Domain/Interfaces/Llm/Semantic/IToolManager.cs
+new file mode 100644
+index 0000000..f4bc918
+--- /dev/null
++++ b/src/Andy.Agentic.Domain/Interfaces/Llm/Semantic/IToolManager.cs
+@@ -0,0 1,15 @@
+using Andy.Agentic.Domain.Models;
+using Microsoft.SemanticKernel;
+
+namespace Andy.Agentic.Domain.Interfaces.Llm.Semantic;
+
++/// <summary>
++/// Interface for managing tools within the application.
++/// Provides methods for adding, removing, and retrieving tools.
++/// </summary>
+public interface IToolManager
++{
+    /// <summary>
+    /// Asynchronously adds a list of tool configurations to the specified kernel.
+    /// </summary>
+    /// <param name="kernel">The kernel to which the tools will be added.</param>
+    /// <param name="tools">A list of tool configurations to be added to the kernel.</param>
+    /// <returns>A task representing the asynchronous operation.</returns>
+    void AddToolsAsync(Kernel kernel, List<Tool> tools);
+}
+\ No newline at end of file
+diff --git a/src/Andy.Agentic.Domain/Models/LlmRequest.cs b/src/Andy.Agentic.Domain/Models/LlmRequest.cs
+index abcb546..69946dd 100644
+--- a/src/Andy.Agentic.Domain/Models/LlmRequest.cs
++++ b/src/Andy.Agentic.Domain/Models/LlmRequest.cs
+@@ -4,5 4,5 @@ public class LlmRequest
+ {
+     public List<ChatHistory> Messages { get; set; } = new List<ChatHistory>();
+ 
+-    public List<OpenAiTool>? Tools { get; set; }
+    public List<Tool>? Tools { get; set; }
+ }
+diff --git a/src/Andy.Agentic.Domain/Models/ParameterSpec.cs b/src/Andy.Agentic.Domain/Models/ParameterSpec.cs
+new file mode 100644
+index 0000000..8283c9b
+--- /dev/null
++++ b/src/Andy.Agentic.Domain/Models/ParameterSpec.cs
+@@ -0,0 1,139 @@
+
+using System.Text.Json;
+using System.Text.Json.Serialization;
+
+public sealed class ParameterSpec
++{
+    [JsonPropertyName("name")]
+    public string Name { get; init; } = default!;
+
+    // This will be populated from JSON "type": "string|integer|number|boolean|array|object"
+    [JsonConverter(typeof(ParameterSpecConverter))]
+    [JsonPropertyName("type")]
+    public Type? Type { get; init; }
+
+    [JsonPropertyName("required")]
+    public bool Required { get; init; }
+
+    [JsonPropertyName("default")]
+    public object? Default { get; init; }
+
+    [JsonPropertyName("description")]
+    public string? Description { get; init; }
+
+    [JsonPropertyName("format")]
+    public string? Format { get; init; }       // optional: int32/int64/float/double
++}
+
+
+
+public sealed class ParameterSpecConverter : JsonConverter<Type?>
+{
+    public override Type? Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
+    {
+        // We expect to be called when reading the "type" property value.
+        // But we also need access to "format", which is a sibling property. 
+        // To handle both, we read the *containing object* here and re-emit the other properties via JsonDocument.
+        // However, property-level converters only get the property value token.
+        // Workaround: We can't see sibling properties here, so we assume format is not needed at this moment.
+        // Better approach: Use a converter for the entire ParameterSpec. See below "Alternative: Whole-object converter".
+        // 
+        // If you must keep the property-level converter, we map "type" *without* format.
+        // Later, you can normalize defaults yourself. For many cases, this is sufficient.
+        if (reader.TokenType == JsonTokenType.String)
+        {
+            var typeStr = reader.GetString();
+            return MapSchemaTypeToClr(typeStr, format: null);
+        }
+
+        // If it's not a string (unexpected), skip and return null
+        reader.Skip();
+        return null;
+    }
+
+    public override void Write(Utf8JsonWriter writer, Type? value, JsonSerializerOptions options)
+    {
+        // When writing, emit the schema type string (e.g., "string", "integer", "number", "boolean", "array", "object")
+        writer.WriteStringValue(MapClrTypeToSchemaType(value, out _));
+    }
+
+    // ---------- Mapping helpers ----------
+
+    private static Type MapSchemaTypeToClr(string? type, string? format)
+    {
+        switch (type?.Trim().ToLowerInvariant())
+        {
+            case "string":
+                return typeof(string);
+
+            case "integer":
+                return (format?.ToLowerInvariant()) switch
+                {
+                    "int32" => typeof(int),
+                    "int64" => typeof(long),
+                    _ => typeof(long) // default integer -> Int64
+                };
+
+            case "number":
+                return (format?.ToLowerInvariant()) switch
+                {
+                    "float" => typeof(float),
+                    "double" => typeof(double),
+                    _ => typeof(double) // default number -> Double
+                };
+
+            case "boolean":
+                return typeof(bool);
+
+            case "array":
+                return typeof(object[]);
+
+            case "object":
+                return typeof(object);
+
+            default:
+                // Unknown -> treat as string
+                return typeof(string);
+        }
+    }
+
+    private static string MapClrTypeToSchemaType(Type? type, out string? format)
+    {
+        format = null;
+
+        if (type == typeof(string))
+            return "string";
+        if (type == typeof(bool))
+            return "boolean";
+
+        if (type == typeof(int))
+        {
+            format = "int32";
+            return "integer";
+        }
+
+        if (type == typeof(long))
+        {
+            format = "int64";
+            return "integer";
+        }
+
+        if (type == typeof(float))
+        {
+            format = "float";
+            return "number";
+        }
+
+        if (type == typeof(double))
+        {
+            format = "double";
+            return "number";
+        }
+
+        if (type == typeof(object[]))
+            return "array";
+
+        // Fallback
+        return "object";
+    }
++}
+diff --git a/src/Andy.Agentic.Domain/Models/Semantic/AiProvider.cs b/src/Andy.Agentic.Domain/Models/Semantic/AiProvider.cs
+new file mode 100644
+index 0000000..cdedbbb
+--- /dev/null
++++ b/src/Andy.Agentic.Domain/Models/Semantic/AiProvider.cs
+@@ -0,0 1 @@
+namespace Andy.Agentic.Domain.Models.Semantic;
+
+/// <summary>
+/// Enumeration representing different AI providers.
+/// </summary>
+public enum AiProvider
+{
+     /// <summary>
+    /// None Enum
+    /// </summary>
+    None,
+
+
+    /// <summary>
+    /// OpenAi Enum
+    /// </summary>
+    OpenAi,
+
+    /// <summary>
+    /// Azure OpenAi Enum
+    /// </summary>
+    AzureOpenAi,
+}
+\ No newline at end of file
+diff --git a/src/Andy.Agentic.Domain/Models/Semantic/KernelConfiguration.cs b/src/Andy.Agentic.Domain/Models/Semantic/KernelConfiguration.cs
+new file mode 100644
+index 0000000..98d59c0
+--- /dev/null
++++ b/src/Andy.Agentic.Domain/Models/Semantic/KernelConfiguration.cs
+@@ -0,0 1,15 @@
+namespace Andy.Agentic.Domain.Models.Semantic;
+
+public class KernelConfiguration
++{
+    public AiProvider? Provider { get; set; }
+    public string? ModelId { get; set; }
+    public string? OpenAIApiKey { get; set; }
+    public string? AzureEndpoint { get; set; }
+    public string? AzureApiKey { get; set; }
+    public string? AzureDeploymentName { get; set; }
+    public string? AnthropicApiKey { get; set; }
+    public string? HuggingFaceApiKey { get; set; }
+    public List<ToolConfiguration>? Tools { get; set; }
+    public Dictionary<string, object>? AdditionalSettings { get; set; }
++}
+diff --git a/src/Andy.Agentic.Domain/Models/Semantic/KernelResponse.cs b/src/Andy.Agentic.Domain/Models/Semantic/KernelResponse.cs
+new file mode 100644
+index 0000000..3211d2e
+--- /dev/null
++++ b/src/Andy.Agentic.Domain/Models/Semantic/KernelResponse.cs
+@@ -0,0 1,5 @@
+using Microsoft.SemanticKernel;
+
+namespace Andy.Agentic.Domain.Models.Semantic;
+
+public record KernelResponse(Kernel Kernel, Microsoft.SemanticKernel.ChatCompletion.ChatHistory ChatHistory);
+diff --git a/src/Andy.Agentic.Domain/Models/Semantic/McpClient.cs b/src/Andy.Agentic.Domain/Models/Semantic/McpClient.cs
+new file mode 100644
+index 0000000..4d85283
+--- /dev/null
++++ b/src/Andy.Agentic.Domain/Models/Semantic/McpClient.cs
+@@ -0,0 1,18 @@
+namespace Andy.Agentic.Domain.Models.Semantic;
+
+public class McpClient
++{
+    private readonly string _serverPath;
+
+    public McpClient(string? serverPath)
+    {
+        _serverPath = serverPath ?? throw new ArgumentNullException(nameof(serverPath));
+    }
+
+    public async Task<string> ExecuteAsync(string toolName, string input)
+    {
+        // Implement MCP client logic here
+        await Task.Delay(100); // Placeholder
+        return $"MCP tool {toolName} executed with input: {input}";
+    }
++}
+diff --git a/src/Andy.Agentic.Domain/Models/Semantic/ToolConfiguration.cs b/src/Andy.Agentic.Domain/Models/Semantic/ToolConfiguration.cs
+new file mode 100644
+index 0000000..cbbcb2b
+--- /dev/null
++++ b/src/Andy.Agentic.Domain/Models/Semantic/ToolConfiguration.cs
+@@ -0,0 1,56 @@
+namespace Andy.Agentic.Domain.Models.Semantic;
+
++/// <summary>
++/// Represents the configuration settings for a tool.
++/// </summary>
+public class ToolConfiguration
++{
+    /// <summary>
+    /// Gets or sets the name. Defaults to an empty string.
+    /// </summary>
+    public string Name { get; set; } = string.Empty;
+    /// <summary>
+    /// Gets or sets the description.
+    /// </summary>
+    public string Description { get; set; } = string.Empty;
+    /// <summary>
+    /// Gets or sets the type of the tool.
+    /// </summary>
+    public ToolType Type { get; set; }
+    /// <summary>
+    /// Gets or sets the endpoint URL. This property can be null.
+    /// </summary>
+    public string? Endpoint { get; set; }
+    /// <summary>
+    /// Gets or sets the HTTP method to be used for the request.
+    /// </summary>
+    public string? HttpMethod { get; set; }
+    /// <summary>
+    /// Gets or sets the headers as a dictionary where the key is the header name and the value is the header value.
+    /// </summary>
+    public Dictionary<string, string>? Headers { get; set; }
+    /// <summary>
+    /// Gets or sets the content template. This property can be null.
+    /// </summary>
+    public string? ContentTemplate { get; set; }
+    /// <summary>
+    /// Gets or sets the query parameter. This can be null.
+    /// </summary>
+    public string? QueryParameter { get; set; }
+    /// <summary>
+    /// Gets or sets the parameters as a dictionary where the key is a string and the value is an object.
+    /// </summary>
+    public Dictionary<string, object>? Parameters { get; set; }
+    /// <summary>
+    /// Gets or sets the path to the MCP server. This property can be null.
+    /// </summary>
+    public string? McpServerPath { get; set; }
+    /// <summary>
+    /// Gets or sets the assembly name for the native function.
+    /// </summary>
+    public string? NativeFunctionAssembly { get; set; }
+    /// <summary>
+    /// Gets or sets the type of the native function. This property can be null.
+    /// </summary>
+    public string? NativeFunctionType { get; set; }
+    /// <summary>
+    /// Gets or sets the native function method. This property can hold a null value.
+    /// </summary>
+    public string? NativeFunctionMethod { get; set; }
+}
+\ No newline at end of file
+diff --git a/src/Andy.Agentic.Domain/Models/Semantic/ToolType.cs b/src/Andy.Agentic.Domain/Models/Semantic/ToolType.cs
+new file mode 100644
+index 0000000..95b87e0
+--- /dev/null
++++ b/src/Andy.Agentic.Domain/Models/Semantic/ToolType.cs
+@@ -0,0 1,8 @@
+namespace Andy.Agentic.Domain.Models.Semantic;
+
++/// <summary>
++/// Represents the different types of tools available in the system.
++/// </summary>
+public enum ToolType
++{
+    /// <summary>
+    /// ApiTool Enum
+    /// </summary>
+    ApiTool,
+
+    /// <summary>
+    /// ApiTool Enum
+    /// </summary>
+    McpTool,
+
+    /// <summary>
+    /// ApiTool Enum
+    /// </summary>
+    NativeFunction
+}
+
+diff --git a/src/Andy.Agentic.Domain/Models/ToolExecutionRecorder.cs b/src/Andy.Agentic.Domain/Models/ToolExecutionRecorder.cs
+new file mode 100644
+index 0000000..3620732
+--- /dev/null
++++ b/src/Andy.Agentic.Domain/Models/ToolExecutionRecorder.cs
+@@ -0,0 1,10 @@
+using System.Collections.Concurrent;
+
+namespace Andy.Agentic.Domain.Models;
+
+public sealed class ToolExecutionRecorder
++{
+    private readonly ConcurrentBag<ToolExecutionLog> _records = new();
+    public IReadOnlyCollection<ToolExecutionLog> Records => _records;
+    public void Add(ToolExecutionLog r) => _records.Add(r);
++}
+diff --git a/src/Andy.Agentic.Infrastructure/Andy.Agentic.Infrastructure.csproj b/src/Andy.Agentic.Infrastructure/Andy.Agentic.Infrastructure.csproj
+index 7930806..cc56692 100644
+--- a/src/Andy.Agentic.Infrastructure/Andy.Agentic.Infrastructure.csproj
++++ b/src/Andy.Agentic.Infrastructure/Andy.Agentic.Infrastructure.csproj
+@@ -8,11 8,22 @@
+ 
+   <ItemGroup>
+     <None Remove="C:\Repo\andy-agentic\README.md" />
+    <None Remove="Monikers.imagemanifest" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <content Include="Monikers.imagemanifest">
+      <IncludeInVSIX>true</IncludeInVSIX>
+    </content>
+   </ItemGroup>
+ 
+   <ItemGroup>
+     <PackageReference Include="Microsoft.EntityFrameworkCore" Version="9.0.8" />
+     <PackageReference Include="Microsoft.EntityFrameworkCore.Tools" Version="9.0.8" />
+    <PackageReference Include="Microsoft.SemanticKernel" Version="1.65.0" />
+    <PackageReference Include="Microsoft.SemanticKernel.Agents.Core" Version="1.65.0" />
+    <PackageReference Include="Microsoft.SemanticKernel.Core" Version="1.65.0" />
+    <PackageReference Include="Microsoft.SemanticKernel.Plugins.OpenApi" Version="1.65.0" />
+     <PackageReference Include="ModelContextProtocol.AspNetCore" Version="0.3.0-preview.4" /> 
+     <PackageReference Include="OpenAI" Version="2.4.0" />
+     <PackageReference Include="Pomelo.EntityFrameworkCore.MySql" Version="9.0.0" />
+diff --git a/src/Andy.Agentic.Infrastructure/Monikers.imagemanifest b/src/Andy.Agentic.Infrastructure/Monikers.imagemanifest
+new file mode 100644
+index 0000000..abe865e
+--- /dev/null
++++ b/src/Andy.Agentic.Infrastructure/Monikers.imagemanifest
+@@ -0,0 1,11 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
++<!-- This file was generated by the ManifestFromResources tool.-->
++<!-- Version: 14.0.50929.2 -->
++<ImageManifest xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns="http://schemas.microsoft.com/VisualStudio/ImageManifestSchema/2014">
+  <Symbols>
+    <String Name="Resources" Value="/Andy.Agentic.Infrastructure;Component/../Andy.Agentic.Infrastructure" />
+    <Guid Name="MonikersGuid" Value="{c41e8541-64c2-4267-8c27-f62f0360882f}" />
+  </Symbols>
+  <Images />
+  <ImageLists />
++</ImageManifest>
+\ No newline at end of file
+diff --git a/src/Andy.Agentic.Infrastructure/Semantic/Builder/SemanticKernelBuilder.cs b/src/Andy.Agentic.Infrastructure/Semantic/Builder/SemanticKernelBuilder.cs
+new file mode 100644
+index 0000000..c2247df
+--- /dev/null
++++ b/src/Andy.Agentic.Infrastructure/Semantic/Builder/SemanticKernelBuilder.cs
+@@ -0,0 1,54 @@
+using Andy.Agentic.Domain.Interfaces.Llm.Semantic;
+using Andy.Agentic.Domain.Models;
+using Andy.Agentic.Domain.Models.Semantic;
+using Andy.Agentic.Infrastructure.Semantic.Interceptor;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
+using Microsoft.SemanticKernel;
+using Microsoft.SemanticKernel.Agents;
+using Microsoft.SemanticKernel.Connectors.OpenAI;
+using Agent = Andy.Agentic.Domain.Models.Agent;
+
+namespace Andy.Agentic.Infrastructure.Semantic.Builder;
+
++/// <summary>
++/// Represents a builder for creating instances of SemanticKernel.
++/// Implements the ISemanticKernelBuilder interface.
++/// </summary>
+public class SemanticKernelBuilder : ISemanticKernelBuilder
++{
+    private readonly IProviderDetector _providerDetector;
+    private readonly IAiServiceFactory _aiServiceFactory;
+    private readonly IToolManager _toolManager;
+    private readonly ILogger<SemanticKernelBuilder>? _logger;
+
+    /// <summary>
+    /// Initializes a new instance of the <see cref="SemanticKernelBuilder"/> class.
+    /// </summary>
+    /// <param name="providerDetector">The provider detector used to identify the AI service provider.</param>
+    /// <param name="aiServiceFactory">The factory used to create AI services.</param>
+    /// <param name="toolManager">The manager responsible for handling tools.</param>
+    /// <param name="logger">Optional logger for logging information.</param>
+    public SemanticKernelBuilder(
+            IProviderDetector providerDetector,
+            IAiServiceFactory aiServiceFactory,
+            IToolManager toolManager,
+            ILogger<SemanticKernelBuilder>? logger = null)
+    {
+        _providerDetector = providerDetector;
+        _aiServiceFactory = aiServiceFactory;
+        _toolManager = toolManager;
+        _logger = logger;
+    }
+
+    /// <summary>
+    /// Calls the agent asynchronously and streams chat message content.
+    /// Intercepts streaming responses to detect function calls.
+    /// </summary>
+    /// <param name="query">The kernel response containing chat history and kernel information.</param>
+    /// <returns>
+    /// An asynchronous stream of <see cref="StreamingChatMessageContent"/> representing the agent's responses.
+    /// </returns>
+    public async IAsyncEnumerable<StreamingChatMessageContent> CallAgentAsync(KernelResponse query)
+    {
+
+        AgentThread thread = new ChatHistoryAgentThread(chatHistory: query.ChatHistory);
+
+        ChatCompletionAgent agent =
+            new()
+            {
+                Name = "agent",
+                Kernel = query.Kernel,
+                Arguments = new KernelArguments(
+                    new OpenAIPromptExecutionSettings()
+                    {
+                        FunctionChoiceBehavior = FunctionChoiceBehavior.Auto(),
+                    }),
+
+            };
+
+        await foreach (var response in agent.InvokeStreamingAsync(thread))
+        {
+            // Intercept streaming responses to detect function calls
+            if (response.Message.Content != null)
+            {
+                // Check if this is a function call response
+                if (IsFunctionCallResponse(response.Message))
+               {
+                   Console.WriteLine($"Function call detected in stream: {response.Message.Content}");
+               }
+
+               yield return response;
+           }
+       }
+   }
+
+   /// <summary>
+   /// Determines if the given response contains indicators of a function call.
+   /// </summary>
+   /// <param name="response">The response to check.</param>
+   /// <returns>True if the response contains function call indicators; otherwise, false.</returns>
+   private bool IsFunctionCallResponse(StreamingChatMessageContent response)
+   {
+       return response.Content?.Contains("function") == true ||
+              response.Content?.Contains("tool_call") == true;
+   } 
+
+
+    /// <summary>
+    /// Builds a Semantic Kernel asynchronously using the provided agent, session, configuration, request, and tool execution recorder.
+    /// </summary>
+    /// <param name="agent">The agent used for building the kernel.</param>
+    /// <param name="session">The session identifier.</param>
+    /// <param name="config">The configuration for the LLM.</param>
+    /// <param name="request">The request containing details for the kernel build.</param>
+    /// <param name="toolExecutionRecorder">The recorder for tool execution.</param>
+    /// <returns>
+    /// Returns a KernelResponse containing the built kernel and chat history.
+    /// </returns>
+    public KernelResponse BuildKernelAsync(
+            Agent agent,
+            string session,
+            LlmConfig config,
+            LlmRequest request,
+            ToolExecutionRecorder toolExecutionRecorder)
+    {
+        _logger?.LogInformation("Building Semantic Kernel...");
+
+        var provider = _providerDetector.DetectProvider(config);
+        var builder = Kernel.CreateBuilder();
+
+        _aiServiceFactory.AddAiService(builder, config, provider);
+
+        builder.Services.AddLogging(logging =>
+        {
+            logging.AddConsole();
+            logging.SetMinimumLevel(LogLevel.Debug);
+      });
+
+        var kernel = builder.Build();
+
+        kernel.FunctionInvocationFilters.Add(new FunctionInterceptorFilter(toolExecutionRecorder, agent, session, request.Tools!));
+
+
+        if (request.Tools?.Any() == true)
+        {
+            _toolManager.AddToolsAsync(kernel, request.Tools);
+        }
+
+        var chatHistory = new Microsoft.SemanticKernel.ChatCompletion.ChatHistory();
+
+
+        foreach (var message in request.Messages)
+        {
+            if (message.Role == "user")
+            {
+                chatHistory.AddUserMessage(message.Content);
+            }
+            else
+            {
+                chatHistory.AddAssistantMessage(message.Content);
+            }
+        }
+
+        return new KernelResponse(kernel, chatHistory);
+    }
++}
+\ No newline at end of file
+diff --git a/src/Andy.Agentic.Infrastructure/Semantic/Interceptor/ToolInterceptor.cs b/src/Andy.Agentic.Infrastructure/Semantic/Interceptor/ToolInterceptor.cs
+new file mode 100644
+index 0000000..db9cdb3
+--- /dev/null
++++ b/src/Andy.Agentic.Infrastructure/Semantic/Interceptor/ToolInterceptor.cs
+@@ -0,0 1,29 @@
+using System.Text.Json;
+using Andy.Agentic.Domain.Models;
+using Microsoft.SemanticKernel;
+using Tool = Andy.Agentic.Domain.Models.Tool;
+
+namespace Andy.Agentic.Infrastructure.Semantic.Interceptor;
+
++/// <summary>
++/// Represents a filter that intercepts function execution and records tool execution details.
++/// </summary>
+public sealed class FunctionInterceptorFilter(ToolExecutionRecorder recorder,
+   Agent agent,
+   string session,
+   List<Tool> tools) : IFunctionInvocationFilter
++{
+    /// <summary>
+    /// Invokes the function asynchronously, logs the execution details, and handles any exceptions.
+    /// </summary>
+    /// <param name="context">The context of the function invocation.</param>
+    /// <param name="next">The delegate to invoke the next function in the pipeline.</param>
+    /// <returns>
+    /// A task representing the asynchronous operation.
+    /// </returns>
+    public async Task OnFunctionInvocationAsync(
+            FunctionInvocationContext context,
+            Func<FunctionInvocationContext, Task> next)
+    {
+        var tool = tools.FirstOrDefault(x => x.Name == context.Function.PluginName);
+        var rec = new ToolExecutionLog
+        {
+            Id = Guid.NewGuid(),
+            ToolId = tool!.Id,
+            ToolName = tool.Name,
+            AgentId = agent.Id,
+            SessionId = session,
+            Parameters = SerializeArguments(context.Arguments)!,
+            ExecutedAt = DateTime.UtcNow,
+        };
+
+
+        try
+        {
+            await next(context); 
+            rec.Success = true;
+            var resultObj = context.Result.GetValue<object>();
+            rec.Result = resultObj is string s ? s : JsonSerializer.Serialize(resultObj);
+        }
+        catch (Exception ex)
+        {
+            rec.Success = false;
+            rec.ErrorMessage = ex.ToString();
+            throw; 
+        }
+        finally
+        {
+            recorder.Add(rec);
+        }
+    }
+
+    /// <summary>
+    /// Serializes the given KernelArguments into a dictionary where the keys are strings and the values are objects.
+    /// </summary>
+    /// <param name="args">The KernelArguments to be serialized.</param>
+    /// <returns>A dictionary with the serialized arguments.</returns>
+    private static Dictionary<string, object?> SerializeArguments(KernelArguments args)
+            => args.ToDictionary(kvp => kvp.Key, kvp => kvp.Value);
+}
+\ No newline at end of file
+diff --git a/src/Andy.Agentic.Infrastructure/Semantic/Provider/AIServiceFactory.cs b/src/Andy.Agentic.Infrastructure/Semantic/Provider/AIServiceFactory.cs
+new file mode 100644
+index 0000000..ae6be8c
+--- /dev/null
++++ b/src/Andy.Agentic.Infrastructure/Semantic/Provider/AIServiceFactory.cs
+@@ -0,0 1,35 @@
+using Andy.Agentic.Domain.Interfaces.Llm.Semantic;
+using Andy.Agentic.Domain.Models;
+using Andy.Agentic.Domain.Models.Semantic;
+using Microsoft.Extensions.Logging;
+using Microsoft.SemanticKernel;
+
+namespace Andy.Agentic.Infrastructure.Semantic.Provider;
+
++/// <summary>
++/// Factory class responsible for creating instances of AI services.
++/// Implements the IAIServiceFactory interface.
++/// </summary>
+public class AiServiceFactory : IAiServiceFactory
++{
+    private readonly ILogger<AiServiceFactory>? _logger;
+
+    /// <summary>
+    /// Initializes a new instance of the <see cref="AiServiceFactory"/> class.
+    /// </summary>
+    /// <param name="logger">An optional logger instance for logging purposes.</param>
+    public AiServiceFactory(ILogger<AiServiceFactory>? logger = null)
+    {
+        _logger = logger;
+    }
+
+    /// <summary>
+    /// Adds the AI service to the kernel builder based on the specified provider.
+    /// </summary>
+    /// <param name="builder">The kernel builder to which the AI service will be added.</param>
+    /// <param name="config">The configuration settings for the AI service.</param>
+    /// <param name="provider">The AI provider to be used.</param>
+    /// <exception cref="NotSupportedException">Thrown when the specified provider is not supported.</exception>
+    public void AddAiService(IKernelBuilder builder, LlmConfig config, AiProvider provider)
+    {
+        switch (provider)
+        {
+            case AiProvider.OpenAi:
+                AddOpenAiService(builder, config);
+                break;
+            case AiProvider.AzureOpenAi:
+                AddAzureOpenAiService(builder, config);
+                break;
+            default:
+                throw new NotSupportedException($"Provider {provider} is not supported");
+        }
+    }
+
+    /// <summary>
+    /// Adds the OpenAI service to the kernel builder with the specified configuration.
+    /// </summary>
+    /// <param name="builder">The kernel builder to which the OpenAI service will be added.</param>
+    /// <param name="config">The configuration containing the API key, model ID, and base URL for the OpenAI service.</param>
+    private void AddOpenAiService(IKernelBuilder builder, LlmConfig config)
+   {
+       var apiKey = config.ApiKey ?? throw new ArgumentException("OpenAI API Key is required");
+       var modelId = config.Model;
+       var baseUrl = config.BaseUrl;
+
+       builder.AddOpenAIChatCompletion(modelId: modelId, apiKey: apiKey, endpoint: new Uri(baseUrl));
+
+       _logger?.LogInformation("Added OpenAI service with model: {ModelId}", modelId);
+    }
+
+    /// <summary>
+    /// Adds the Azure OpenAI service to the kernel builder with the specified configuration.
+    /// </summary>
+    /// <param name="builder">The kernel builder to which the Azure OpenAI service will be added.</param>
+    /// <param name="config">The configuration containing the necessary details for the Azure OpenAI service.</param>
+    /// <exception cref="ArgumentException">Thrown when any of the required configuration parameters are null or empty.</exception>
+    private void AddAzureOpenAiService(IKernelBuilder builder, LlmConfig config)
+    {
+        var endpoint = config.BaseUrl ?? throw new ArgumentException("Azure endpoint is required");
+        var apiKey = config.ApiKey ?? throw new ArgumentException("Azure API Key is required");
+        var deploymentName = config.Model ?? throw new ArgumentException("Azure deployment name is required");
+
+        builder.AddAzureOpenAIChatCompletion(deploymentName, endpoint, apiKey);
+        _logger?.LogInformation("Added Azure OpenAI service with deployment: {DeploymentName}", deploymentName);
+    }
+
++}
+\ No newline at end of file
+diff --git a/src/Andy.Agentic.Infrastructure/Semantic/Provider/ProviderDetector.cs b/src/Andy.Agentic.Infrastructure/Semantic/Provider/ProviderDetector.cs
+new file mode 100644
+index 0000000..bcfb59c
+--- /dev/null
++++ b/src/Andy.Agentic.Infrastructure/Semantic/Provider/ProviderDetector.cs
+@@ -0,0 1,21 @@
+using Andy.Agentic.Domain.Interfaces.Llm.Semantic;
+using Andy.Agentic.Domain.Models;
+using Andy.Agentic.Domain.Models.Semantic;
+using Microsoft.Extensions.Logging;
+
+namespace Andy.Agentic.Infrastructure.Semantic.Provider;
+
++/// <summary>
++/// Represents a class that detects providers, optionally using a logger for logging purposes.
++/// </summary>
+public class ProviderDetector(ILogger<ProviderDetector>? logger = null) : IProviderDetector
++{
+    /// <summary>
+    /// Detects the AI provider based on the given configuration.
+    /// If the provider is explicitly set in the configuration, it uses that.
+    /// Otherwise, it defaults to AiProvider.None.
+    /// </summary>
+    /// <param name="config">The configuration containing the provider information.</param>
+    /// <returns>
+    /// The detected AI provider based on the configuration.
+    /// </returns>
+    public AiProvider DetectProvider(LlmConfig config)
+    {
+        // If explicitly set, use that
+        if (string.IsNullOrEmpty(config.Provider))
+       {
+           logger?.LogInformation("Using explicitly configured provider: {Provider}", config.Provider);
+           return AiProvider.None;
+       }
+
+        return Enum.Parse<AiProvider>(config.Provider);
+    }
++}
+\ No newline at end of file
+diff --git a/src/Andy.Agentic.Infrastructure/Semantic/ServiceCollectionExtensions.cs b/src/Andy.Agentic.Infrastructure/Semantic/ServiceCollectionExtensions.cs
+new file mode 100644
+index 0000000..324440d
+--- /dev/null
++++ b/src/Andy.Agentic.Infrastructure/Semantic/ServiceCollectionExtensions.cs
+@@ -0,0 1,11 @@
+using Andy.Agentic.Domain.Interfaces.Llm.Semantic;
+using Andy.Agentic.Infrastructure.Semantic.Builder;
+using Andy.Agentic.Infrastructure.Semantic.Provider;
+using Andy.Agentic.Infrastructure.Semantic.Tools;
+using Microsoft.Extensions.DependencyInjection;
+
+namespace Andy.Agentic.Infrastructure.Semantic;
+
++/// <summary>
++/// Provides extension methods for configuring services in an IServiceCollection.
++/// </summary>
+public static class ServiceCollectionExtensions
+{
+    /// <summary>
+    /// Adds the necessary services for the Semantic Kernel Builder to the provided IServiceCollection.
+    /// </summary>
+    /// <returns>
+    /// The updated IServiceCollection with the Semantic Kernel Builder services added.
+    /// </returns>
+    public static IServiceCollection AddSemanticKernelBuilder(this IServiceCollection services)
+    {
+        services.AddSingleton<IProviderDetector, ProviderDetector>();
+        services.AddSingleton<IAiServiceFactory, AiServiceFactory>();
+        services.AddSingleton<ISemanticKernelBuilder, SemanticKernelBuilder>();
+        services.AddSingleton<ApiToolFactory>();
+        services.AddSingleton<McpToolFactory>();
+        services.AddSingleton<NativeFunctionToolFactory>();
+        services.AddSingleton<IToolManager, ToolManager>();
+        services.AddSingleton<SemanticKernelBuilder>();
+        services.AddHttpClient();
+
+        return services;
+    }
++}
+\ No newline at end of file
+diff --git a/src/Andy.Agentic.Infrastructure/Semantic/Tools/ApiToolFactory.cs b/src/Andy.Agentic.Infrastructure/Semantic/Tools/ApiToolFactory.cs
+new file mode 100644
+index 0000000..fff0753
+--- /dev/null
++++ b/src/Andy.Agentic.Infrastructure/Semantic/Tools/ApiToolFactory.cs
+@@ -0,0 1,15 @@
+using System.Net.Http.Headers;
+using Andy.Agentic.Domain.Models;
+using Microsoft.SemanticKernel;
+
+namespace Andy.Agentic.Infrastructure.Semantic.Tools;
+
++/// <summary>
++/// Initializes a new instance of the <see cref="ApiToolFactory"/> class.
++/// </summary>
+public class ApiToolFactory: ToolFactory
++{
+
+    /// <summary>
+    /// Creates a KernelFunction asynchronously using the provided Tool object. 
+    /// The function is created from the DynamicApiCall method, with the tool's name and description.
+    /// </summary>
+    /// <param name="tool">The Tool object containing the name and description for the KernelFunction.</param>
+    /// <returns>A KernelFunction created from the DynamicApiCall method.</returns>
+    public override KernelFunction CreateToolAsync(Tool tool)
+    {
+        IEnumerable<KernelParameterMetadata>? parameters = null;
+
+        async Task<string> DynamicApiCall(KernelArguments args)
+        {
+            using var client = new HttpClient();
+
+            var headers = ParseHeaders(tool.Headers);
+
+            foreach (var header in headers)
+           {
+                client.DefaultRequestHeaders.Add(header.Key, header.Value.ToString());
+            }
+
+            if (!string.IsNullOrEmpty(tool.Authentication))
+            {
+                client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", tool.Authentication);
+            }
+
+            var callArgs = ParseToolCallArguments(args);
+
+            var configuration = ParseConfiguration(tool.Configuration);
+
+            var endpoint = GetRequiredConfigValue<string>(configuration, "endpoint");
+
+            var url = $"{endpoint}?{string.Join("&", callArgs)}";
+
+            var response = await client.GetAsync(url);
+
+            response.EnsureSuccessStatusCode();
+
+            return await response.Content.ReadAsStringAsync();
+        }
+
+      if (!string.IsNullOrEmpty(tool.Parameters))
+        {
+            var paramSchema = ConvertParamsToDictionary(tool.Parameters);
+
+            parameters = paramSchema.Select(p =>
+            {
+                var metadata = new KernelParameterMetadata(p.Name)
+                {
+                    Description = $"Parameter for {p.Name}",
+                    ParameterType = p.Type,
+                    IsRequired = true
+                };
+                return metadata;
+            }).ToList();
+        }
+
+        return KernelFunctionFactory.CreateFromMethod(
+            method: DynamicApiCall,
+            functionName: tool.Name,
+            description: tool.Description,
+            parameters: parameters
+        );
+    }
+
++}
+diff --git a/src/Andy.Agentic.Infrastructure/Semantic/Tools/McpToolFactory.cs b/src/Andy.Agentic.Infrastructure/Semantic/Tools/McpToolFactory.cs
+new file mode 100644
+index 0000000..de8959c
+--- /dev/null
++++ b/src/Andy.Agentic.Infrastructure/Semantic/Tools/McpToolFactory.cs
+@@ -0,0 1,87 @@
+using System.Text.Json;
+using Microsoft.SemanticKernel;
+using ModelContextProtocol.Client;
+using ModelContextProtocol.Protocol;
+using IMcpClient = ModelContextProtocol.Client.IMcpClient;
+using Tool = Andy.Agentic.Domain.Models.Tool;
+
+namespace Andy.Agentic.Infrastructure.Semantic.Tools;
+
++/// <summary>
++/// Represents a factory for creating instances of MCP tools.
++/// </summary>
+public class McpToolFactory : ToolFactory
++{
+    /// <summary>
+    /// Creates a tool asynchronously using the provided tool configuration.
+    /// </summary>
+    /// <param name="tool">The tool configuration object containing details such as name, description, parameters, and authentication.</param>
+    /// <returns>
+    /// A KernelFunction object representing the created tool, which includes the method to call the tool dynamically and its metadata.
+    /// </returns>
+    public override KernelFunction CreateToolAsync(Tool tool)
+   {
+       IEnumerable<KernelParameterMetadata>? parameters = null;
+
+       async Task<string> DynamicMcpCall(KernelArguments args)
+       {
+            var configuration = ParseConfiguration(tool.Configuration);
+            var headers = ParseHeaders(tool.Headers);
+
+            var endpoint = GetRequiredConfigValue<string>(configuration, "endpoint");
+            var mcpType = GetConfigValue(configuration, "mcpType", "stdio");
+            var workingDirectory = GetConfigValue<string>(configuration, "workingDirectory", null!);
+
+            var remoteToolName = GetConfigValue(configuration, "name", tool.Name);
+
+            var client = await GetOrCreateClientAsync(endpoint, mcpType, workingDirectory, configuration, headers);
+
+            var callArgs = ParseToolCallArguments(args);
+
+            CallToolResult result;
+            try
+            {
+                result = await client.CallToolAsync(remoteToolName, callArgs!).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                throw new InvalidOperationException($"MCP call failed for '{remoteToolName}': {ex.Message}", ex);
+            }
+
+            return SerializeMcpResultToString(result);
+        }
+
+        if (!string.IsNullOrEmpty(tool.Parameters))
+        {
+            var paramSchema = ConvertParamsToDictionary(tool.Parameters);
+
+            parameters = paramSchema.Select(p =>
+            {
+                var metadata = new KernelParameterMetadata(p.Name)
+                {
+                    Description = $"Parameter for {p.Name}",
+                    ParameterType = p.Type,
+                    IsRequired = true
+                };
+                return metadata;
+            }).ToList();
+        }
+
+        return KernelFunctionFactory.CreateFromMethod(
+            method: DynamicMcpCall,
+            functionName: tool.Name,
+            description: tool.Description,
+            parameters: parameters
+        );
+    }
+
+    /// <summary>
+    /// Retrieves or creates an MCP client asynchronously based on the provided endpoint, MCP type, working directory, configuration, and headers.
+    /// Caches the client to avoid redundant creation.
+    /// </summary>
+    /// <param name="endpoint">The endpoint for the MCP client.</param>
+    /// <param name="mcpType">The type of MCP transport (e.g., "stdio", "sse").</param>
+    /// <param name="workingDirectory">The working directory for the MCP client, if applicable.</param>
+    /// <param name="configuration">A dictionary containing configuration settings for the MCP client.</param>
+    /// <param name="headers">A dictionary containing headers for the MCP client.</param>
+    /// <returns>
+    /// An asynchronous task that returns an instance of <see cref="IMcpClient"/>.
+    /// </returns>
+    // -------------------- MCP client creation & caching --------------------
+
+    private static async Task<IMcpClient> GetOrCreateClientAsync(
+        string endpoint,
+        string mcpType,
+        string? workingDirectory,
+        Dictionary<string, object> configuration,
+        Dictionary<string, object> headers)
+    {
+        var transport = mcpType.ToLowerInvariant() switch
+        {
+            "stdio" => CreateStdioTransport(endpoint, configuration, headers, workingDirectory),
+            "sse" => CreateSseTransport(endpoint, configuration, headers),
+            _ => throw new ArgumentException($"Unsupported MCP transport type: {mcpType}")
+        };
+
+        return await McpClientFactory.CreateAsync(transport).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Creates an instance of IClientTransport using the provided endpoint, configuration, headers, and working directory.
+    /// </summary>
+    /// <param name="endpoint">The command and arguments to execute, formatted as "<command/> [args...]".</param>
+    /// <param name="configuration">A dictionary containing configuration settings.</param>
+    /// <param name="headers">A dictionary containing headers to be mapped to environment variables.</param>
+    /// <param name="workingDirectory">The working directory for the command execution.</param>
+    /// <returns>An instance of IClientTransport configured with the provided settings.</returns>
+    private static IClientTransport CreateStdioTransport(
+            string endpoint,
+            Dictionary<string, object> configuration,
+            Dictionary<string, object> headers,
+            string? workingDirectory)
+    {
+        // endpoint format: "<command> [args...]"
+        var parts = endpoint.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        if (parts.Length == 0)
+        {
+            throw new ArgumentException("STDIO endpoint must contain command");
+        }
+
+        var command = parts[0];
+        var args = parts.Skip(1).ToArray();
+
+        // Base env from config
+        var env = GetConfigValue(configuration, "env", new Dictionary<string, string>());
+
+        // Map headers to env vars (e.g., "Authorization" -> "AUTHORIZATION")
+        foreach (var kvp in headers)
+        {
+            var envKey = kvp.Key.Replace('-', '_').ToUpperInvariant();
+            env[envKey] = kvp.Value.ToString() ?? string.Empty;
+        }
+
+        var options = new StdioClientTransportOptions
+        {
+            Name = GetConfigValue(configuration, "name", "STDIO Client"),
+            Command = command,
+            Arguments = args,
+            WorkingDirectory = workingDirectory,
+            EnvironmentVariables = env!
+        };
+
+        return new StdioClientTransport(options);
+    }
+
+    /// <summary>
+    /// Creates an instance of IClientTransport configured for Server-Sent Events (SSE).
+    /// </summary>
+    /// <param name="endpoint">The endpoint URL for the SSE connection.</param>
+    /// <param name="configuration">A dictionary containing configuration settings.</param>
+    /// <param name="headers">A dictionary containing headers to be included in the SSE connection.</param>
+    /// <returns>An instance of IClientTransport configured for SSE.</returns>
+    private static IClientTransport CreateSseTransport(
+            string endpoint,
+            Dictionary<string, object> configuration,
+            Dictionary<string, object> headers)
+    {
+        var options = new SseClientTransportOptions
+        {
+            Endpoint = new Uri(endpoint),
+            ConnectionTimeout = TimeSpan.FromSeconds(120L),
+            Name = GetConfigValue(configuration, "name", "SSE Client"),
+            AdditionalHeaders = headers.ToDictionary(kvp => kvp.Key, kvp => kvp.Value.ToString() ?? string.Empty)
+        };
+
+        var timeout = GetConfigValue<TimeSpan?>(configuration, "timeout", null);
+        if (timeout.HasValue)
+        {
+            options.ConnectionTimeout = timeout.Value;
+        }
+
+        return new SseClientTransport(options);
+    }
+
+    /// <summary>
+    /// Serializes the result of a CallToolResult to a string.
+    /// </summary>
+    /// <param name="result">The CallToolResult to be serialized.</param>
+    /// <returns>
+    /// A string representation of the result. If the result has no content, returns an empty string.
+    /// If the result contains a single text block, returns the text directly.
+    /// Otherwise, returns a JSON string representing the content blocks.
+    /// </returns>
+    // -------------------- Result shaping --------------------
+
+    private static string SerializeMcpResultToString(CallToolResult result)
+    {
+        // No content -> empty
+        if (result.Content.Count == 0)
+        {
+            return string.Empty;
+        }
+
+        // Single text block -> return text directly
+        if (result.Content is [TextContentBlock tcb])
+        {
+            return tcb.Text;
+        }
+
+        // Otherwise serialize to JSON so the calling agent can parse richer output
+        var shaped = result.Content.Select<ContentBlock, object>(c => c switch
+        {
+            TextContentBlock t => new { type = "text", text = t.Text },
+            ImageContentBlock i => new { type = "image", data = i.Data, mimeType = i.MimeType },
+            // Add more MCP part types here as needed
+            _ => new { type = "unknown" }
+        }).ToList();
+
+        return JsonSerializer.Serialize(shaped);
+    }
+
+
+    /// <summary>
+    /// Retrieves a configuration value from the provided dictionary. If the key is not found or the value is null, returns the default value.
+    /// </summary>
+    /// <typeparam name="T">The type of the configuration value.</typeparam>
+    /// <param name="cfg">The dictionary containing configuration values.</param>
+    /// <param name="key">The key to look up in the dictionary.</param>
+    /// <param name="defaultValue">The default value to return if the key is not found or the value is null.</param>
+    /// <returns>
+    /// The configuration value if found and successfully converted; otherwise, the default value.
+    /// </returns>
+    private static T GetConfigValue<T>(Dictionary<string, object> cfg, string key, T defaultValue)
+    {
+        if (!cfg.TryGetValue(key, out var value))
+        {
+            return defaultValue;
+        }
+
+        try
+        {
+            return (T)ConvertTo(typeof(T), value)!;
+        }
+        catch
+        {
+            return defaultValue;
+        }
+    }
+
+    /// <summary>
+    /// Converts the given value to the specified target type.
+    /// Handles conversion from JsonElement to various types including TimeSpan.
+    /// </summary>
+    /// <param name="targetType">The type to which the value should be converted.</param>
+    /// <param name="value">The value to be converted.</param>
+    /// <returns>
+    /// The converted value as the specified target type, or null if conversion is not possible.
+    /// </returns>
+    private static object? ConvertTo(Type targetType, object value)
+    {
+        if (value is JsonElement el)
+        {
+            return el.ValueKind switch
+            {
+                JsonValueKind.String => targetType == typeof(TimeSpan) || targetType == typeof(TimeSpan?)
+                    ? TimeSpan.Parse(el.GetString()!)
+                    : Convert.ChangeType(el.GetString(), targetType),
+                JsonValueKind.Number => Convert.ChangeType(el.GetDouble(), targetType),
+                JsonValueKind.True => Convert.ChangeType(true, targetType),
+                JsonValueKind.False => Convert.ChangeType(false, targetType),
+                _ => null
+            };
+        }
+
+        if (targetType != typeof(TimeSpan) && targetType != typeof(TimeSpan?))
+        {
+            return Convert.ChangeType(value, targetType);
+        }
+
+        if (value is string s && TimeSpan.TryParse(s, out var ts))
+        {
+            return ts;
+        }
+
+        return Convert.ChangeType(value, targetType);
+    }
+}
+\ No newline at end of file
+diff --git a/src/Andy.Agentic.Infrastructure/Semantic/Tools/NativeFunctionToolFactory.cs b/src/Andy.Agentic.Infrastructure/Semantic/Tools/NativeFunctionToolFactory.cs
+new file mode 100644
+index 0000000..05d610a
+--- /dev/null
++++ b/src/Andy.Agentic.Infrastructure/Semantic/Tools/NativeFunctionToolFactory.cs
+@@ -0,0 1,42 @@
+using Andy.Agentic.Domain.Interfaces.Llm.Semantic;
+using Andy.Agentic.Domain.Models;
+using Microsoft.Extensions.Logging;
+using Microsoft.SemanticKernel;
+
+namespace Andy.Agentic.Infrastructure.Semantic.Tools;
+
+public class NativeFunctionToolFactory : IToolFactory
++{
+    private readonly ILogger<NativeFunctionToolFactory>? _logger;
+
+    public NativeFunctionToolFactory(ILogger<NativeFunctionToolFactory>? logger = null)
+    {
+        _logger = logger;
+    }
+
+    public KernelFunction CreateToolAsync(Tool config)
+    {
+        try
+        {
+            // Load assembly and create function from native method
+            //var assembly = System.Reflection.Assembly.LoadFrom(config.NativeFunctionAssembly!);
+            //var type = assembly.GetType(config.NativeFunctionType!)!;
+            //var instance = Activator.CreateInstance(type);
+
+            //var function = KernelFunctionFactory.CreateFromMethod(
+            //    type.GetMethod(config.NativeFunctionMethod!)!,
+            //    instance,
+            //    config.Name,
+            //    config.Description);
+
+            //return Task.FromResult(function);
+
+            throw new NotImplementedException();
+        }
+        catch (Exception ex)
+        {
+            _logger?.LogError(ex, "Error creating native function tool: {ToolName}", config.Name);
+            throw;
+        }
+    }
++}
+diff --git a/src/Andy.Agentic.Infrastructure/Semantic/Tools/ToolFactory.cs b/src/Andy.Agentic.Infrastructure/Semantic/Tools/ToolFactory.cs
+new file mode 100644
+index 0000000..43188ce
+--- /dev/null
++++ b/src/Andy.Agentic.Infrastructure/Semantic/Tools/ToolFactory.cs
+@@ -0,0 1,305 @@
+using System.Globalization;
+using System.Text.Json;
+using Andy.Agentic.Domain.Interfaces.Llm.Semantic;
+using Andy.Agentic.Domain.Models;
+using Microsoft.SemanticKernel;
+
+namespace Andy.Agentic.Infrastructure.Semantic.Tools;
+
++/// <summary>
++/// Represents an abstract base class for creating tool instances.
++/// Implements the IToolFactory interface.
++/// </summary>
+public abstract class ToolFactory : IToolFactory
++{
+    private static readonly JsonDocumentOptions DefaultDocumentOptions = new()
+    {
+        AllowTrailingCommas = true,
+        CommentHandling = JsonCommentHandling.Skip
+    };
+
+    /// <summary>
+    /// Parses a JSON configuration string into a dictionary.
+    /// </summary>
+    protected static Dictionary<string, object> ParseConfiguration(string? configuration)
+    {
+        if (string.IsNullOrEmpty(configuration))
+        {
+            return new Dictionary<string, object>();
+        }
+
+        try
+        {
+            return JsonSerializer.Deserialize<Dictionary<string, object>>(configuration)
+                   ?? new Dictionary<string, object>();
+        }
+        catch (JsonException ex)
+        {
+            throw new ArgumentException("Invalid JSON in tool configuration", nameof(configuration), ex);
+        }
+    }
+
+    /// <summary>
+    /// Gets a required configuration value with type conversion.
+    /// </summary>
+    protected static T GetRequiredConfigValue<T>(Dictionary<string, object> config, string key)
+    {
+        if (!config.TryGetValue(key, out var value))
+        {
+            throw new ArgumentException($"Required configuration value '{key}' is missing");
+        }
+
+        if (value is JsonElement jsonElement)
+        {
+            return JsonSerializer.Deserialize<T>(jsonElement.GetRawText())!;
+        }
+
+        return (T)Convert.ChangeType(value, typeof(T));
+    }
+
+    /// <summary>
+    /// Converts JSON parameter specification to a list of ParameterSpec objects.
+    /// </summary>
+    protected static List<ParameterSpec> ConvertParamsToDictionary(string json)
+    {
+        if (string.IsNullOrWhiteSpace(json))
+        {
+            return new List<ParameterSpec>();
+        }
+
+        return JsonSerializer.Deserialize<List<ParameterSpec>>(json) ?? new List<ParameterSpec>();
+    }
+
+    /// <summary>
+    /// Parses headers from JSON array format into a dictionary.
+    /// </summary>
+    protected static Dictionary<string, object> ParseHeaders(string? headers)
+    {
+        if (string.IsNullOrEmpty(headers))
+        {
+            return new Dictionary<string, object>();
+        }
+
+        try
+        {
+            var headerArray = JsonSerializer.Deserialize<JsonElement[]>(headers);
+            if (headerArray == null)
+            {
+                return new Dictionary<string, object>();
+            }
+
+            var result = new Dictionary<string, object>();
+
+            foreach (var item in headerArray)
+            {
+                if (item.TryGetProperty("name", out var nameElement) &&
+                    item.TryGetProperty("value", out var valueElement))
+                {
+                    var name = nameElement.GetString();
+                    var value = valueElement.GetString();
+
+                    if (!string.IsNullOrEmpty(name))
+                    {
+                        result[name] = value ?? string.Empty;
+                    }
+                }
+            }
+
+            return result;
+        }
+        catch (JsonException ex)
+        {
+            throw new ArgumentException("Invalid JSON in tool headers", nameof(headers), ex);
+        }
+    }
+
+    /// <summary>
+    /// Parses tool call arguments from KernelArguments.
+    /// </summary>
+    protected static Dictionary<string, object> ParseToolCallArguments(KernelArguments args)
+    {
+        try
+        {
+            var result = new Dictionary<string, object>(StringComparer.Ordinal);
+
+            if (args.Count <= 0)
+            {
+                return result;
+            }
+
+            foreach (var kvp in args)
+            {
+                if (string.IsNullOrWhiteSpace(kvp.Key))
+                {
+                    continue;
+                }
+
+                var processedValue = ProcessArgumentValue(kvp.Value);
+                if (processedValue != null)
+                {
+                    result[kvp.Key] = processedValue;
+                }
+            }
+
+            return result;
+        }
+        catch
+        {
+            return new Dictionary<string, object>();
+        }
+    }
+
+    /// <summary>
+    /// Processes argument values with type conversion and JSON parsing.
+    /// </summary>
+    private static object? ProcessArgumentValue(object? valueObj)
+    {
+        return valueObj switch
+        {
+            JsonElement el => ConvertJsonElement(el),
+            string s when IsLikelyJson(s) && TryParseJson(s, out var parsed) => parsed,
+            _ => valueObj
+        };
+    }
+
+    /// <summary>
+    /// Attempts to parse a JSON string.
+    /// </summary>
+    private static bool TryParseJson(string json, out object? result)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(json, DefaultDocumentOptions);
+            result = ConvertJsonElement(doc.RootElement);
+            return true;
+        }
+        catch
+        {
+            result = null;
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Converts a JsonElement to the appropriate .NET type.
+    /// </summary>
+    private static object? ConvertJsonElement(JsonElement el)
+    {
+        return el.ValueKind switch
+        {
+            JsonValueKind.Null or JsonValueKind.Undefined => null,
+            JsonValueKind.True or JsonValueKind.False => el.GetBoolean(),
+            JsonValueKind.Number => ConvertNumber(el),
+            JsonValueKind.String => ConvertString(el),
+            JsonValueKind.Array => ConvertArray(el),
+            JsonValueKind.Object => ConvertObject(el),
+            _ => null
+        };
+    }
+
+    /// <summary>
+    /// Converts a numeric JsonElement to the most appropriate numeric type.
+    /// </summary>
+    private static object ConvertNumber(JsonElement el)
+    {
+        if (el.TryGetInt64(out var longValue))
+        {
+            return longValue;
+        }
+
+        if (el.TryGetDecimal(out var decimalValue))
+        {
+            return decimalValue;
+        }
+
+        return el.GetDouble();
+    }
+
+    /// <summary>
+    /// Converts a string JsonElement with type inference and nested JSON parsing.
+    /// </summary>
+    private static object? ConvertString(JsonElement el)
+    {
+        var stringValue = el.GetString();
+        if (stringValue == null)
+        {
+            return null;
+        }
+
+        if (bool.TryParse(stringValue, out var boolValue))
+        {
+            return boolValue;
+        }
+
+        if (long.TryParse(stringValue, NumberStyles.Integer, CultureInfo.InvariantCulture, out var longValue))
+        {
+            return longValue;
+        }
+
+        if (decimal.TryParse(stringValue, NumberStyles.Number, CultureInfo.InvariantCulture, out var decimalValue))
+        {
+            return decimalValue;
+        }
+
+        var trimmed = stringValue.Trim();
+        if (!IsLikelyJson(trimmed))
+        {
+            return stringValue;
+        }
+
+        try
+        {
+            using var innerDoc = JsonDocument.Parse(trimmed);
+            return ConvertJsonElement(innerDoc.RootElement);
+        }
+        catch
+        {
+            // Fall through to return original string
+        }
+
+        return stringValue;
+    }
+
+    /// <summary>
+    /// Converts a JSON array to a List of objects.
+    /// </summary>
+    private static List<object?> ConvertArray(JsonElement el)
+    {
+        var list = new List<object?>();
+        foreach (var item in el.EnumerateArray())
+        {
+            list.Add(ConvertJsonElement(item));
+        }
+        return list;
+    }
+
+    /// <summary>
+    /// Converts a JSON object to a Dictionary.
+    /// </summary>
+    private static Dictionary<string, object> ConvertObject(JsonElement el)
+    {
+        var dict = new Dictionary<string, object>(StringComparer.Ordinal);
+        foreach (var prop in el.EnumerateObject())
+        {
+            var value = ConvertJsonElement(prop.Value);
+            if (value != null)
+            {
+                dict[prop.Name] = value;
+            }
+        }
+        return dict;
+    }
+
+    /// <summary>
+    /// Determines if a string looks like JSON (object or array).
+    /// </summary>
+    private static bool IsLikelyJson(string s)
+        => s.Length >= 2 && ((s[0] == '{' && s[^1] == '}') || (s[0] == '[' && s[^1] == ']'));
+
+    /// <summary>
+    /// Creates a tool asynchronously based on the provided configuration.
+    /// </summary>
+    /// <param name="config">The configuration settings for the tool.</param>
+    /// <returns>A task that represents the asynchronous operation, containing the created KernelFunction.</returns>
+    public abstract KernelFunction CreateToolAsync(Tool config);
++}
+diff --git a/src/Andy.Agentic.Infrastructure/Semantic/Tools/ToolManager.cs b/src/Andy.Agentic.Infrastructure/Semantic/Tools/ToolManager.cs
+new file mode 100644
+index 0000000..aa91ad7
+--- /dev/null
++++ b/src/Andy.Agentic.Infrastructure/Semantic/Tools/ToolManager.cs
+@@ -0,0 1,28 @@
+++using Andy.Agentic.Domain.Interfaces.Llm.Semantic;
+using Andy.Agentic.Domain.Models;
+using Andy.Agentic.Domain.Models.Semantic;
+using Microsoft.Extensions.Logging;
+using Microsoft.SemanticKernel;
+
+namespace Andy.Agentic.Infrastructure.Semantic.Tools;
+
++/// <summary>
++/// Represents a manager responsible for handling tools.
++/// Implements the IToolManager interface.
++/// </summary>
+public class ToolManager : IToolManager
++{
+   private readonly Dictionary<ToolType, IToolFactory> _toolFactories;
+   private readonly ILogger<ToolManager>? _logger;
+
+    /// <summary>
+    /// Initializes a new instance of the <see cref="ToolManager"/> class.
+    /// </summary>
+    /// <param name="apiToolFactory">Factory for creating API tools.</param>
+    /// <param name="mcpToolFactory">Factory for creating MCP tools.</param>
+    /// <param name="nativeToolFactory">Factory for creating native function tools.</param>
+    /// <param name="logger">Optional logger for logging operations.</param>
+    public ToolManager(
+            ApiToolFactory apiToolFactory,
+            McpToolFactory mcpToolFactory,
+            NativeFunctionToolFactory nativeToolFactory,
+            ILogger<ToolManager>? logger = null)
+    {
+        _toolFactories = new Dictionary<ToolType, IToolFactory>
+        {
+            { ToolType.ApiTool, apiToolFactory },
+            { ToolType.McpTool, mcpToolFactory },
+            { ToolType.NativeFunction, nativeToolFactory }
+        };
+        _logger = logger;
+    }
+
+    /// <summary>
+    /// Adds a list of tools to the specified kernel asynchronously.
+    /// </summary>
+    /// <param name="kernel">The kernel to which the tools will be added.</param>
+    /// <param name="tools">A list of tool configurations to be added.</param>
+    /// <returns>
+    /// A task representing the asynchronous operation.
+    /// </returns>
+    public void AddToolsAsync(Kernel kernel, List<Tool> tools)
+   {
+
+        foreach (var tool in tools)
+        {
+            try
+            {
+                if (_toolFactories.TryGetValue(Enum.Parse<ToolType>(tool.Type), out var factory))
+                {
+                    var function = factory.CreateToolAsync(tool);
+                    kernel.ImportPluginFromFunctions(tool.Name, [function]);
+                    _logger?.LogInformation("Successfully added tool: {ToolName} of type {ToolType}", tool.Name, tool.Type);
+                }
+                else
+                {
+                    _logger?.LogWarning("Unknown tool type: {ToolType} for tool: {ToolName}", tool.Type, tool.Name);
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger?.LogError(ex, "Failed to add tool: {ToolName}", tool.Name);
+            }
+        }
+    }
++}
+\ No newline at end of file
+diff --git a/src/Andy.Agentic.Infrastructure/Services/ToolProviders/ApiToolProvider.cs b/src/Andy.Agentic.Infrastructure/Services/ToolProviders/ApiToolProvider.cs
+index 8f0ad53..c681081 100644
+--- a/src/Andy.Agentic.Infrastructure/Services/ToolProviders/ApiToolProvider.cs
++++ b/src/Andy.Agentic.Infrastructure/Services/ToolProviders/ApiToolProvider.cs
+@@ -18,6 18,7 @@ public class ApiToolProvider(HttpClient httpClient) : IToolProvider
+     /// </summary>
+     public string ToolType => "api";
+ 
+
+     /// <summary>
+     /// ExecuteToolAsync
+     /// </summary>
+@@ -79,23 80,6 @@ public class ApiToolProvider(HttpClient httpClient) : IToolProvider
+     /// <returns></returns>
+     public bool CanHandleToolType(string toolType) => string.Equals(toolType, ToolType, StringComparison.OrdinalIgnoreCase);
+ 
+-    private static Dictionary<string, object> ParseConfiguration(string? configuration)
+-    {
+-        if (string.IsNullOrEmpty(configuration))
+-        {
+-            return new Dictionary<string, object>();
+-        }
+-
+-        try
+-        {
+-            return JsonSerializer.Deserialize<Dictionary<string, object>>(configuration)
+-                   ?? new Dictionary<string, object>();
+-        }
+-        catch (JsonException ex)
+-        {
+-            throw new ArgumentException("Invalid JSON in tool configuration", nameof(configuration), ex);
+-        }
+-    }
+  
+     private static Dictionary<string, object> ParseAuthentication(string? authentication)
+     {
+@@ -146,6 130,24 @@ public class ApiToolProvider(HttpClient httpClient) : IToolProvider
+         }
+     }
+ 
+    private static Dictionary<string, object> ParseConfiguration(string? configuration)
+    {
+        if (string.IsNullOrEmpty(configuration))
+        {
+            return new Dictionary<string, object>();
+        }
+
+        try
+        {
+            return JsonSerializer.Deserialize<Dictionary<string, object>>(configuration)
+                   ?? new Dictionary<string, object>();
+        }
+        catch (JsonException ex)
+        {
+            throw new ArgumentException("Invalid JSON in tool configuration", nameof(configuration), ex);
+        }
+    }
+
+     private static T GetRequiredConfigValue<T>(Dictionary<string, object> config, string key)
+     {
+         if (!config.TryGetValue(key, out var value))
+diff --git a/src/Andy.Agentic.Infrastructure/Services/ToolProviders/McpToolProvider.cs b/src/Andy.Agentic.Infrastructure/Services/ToolProviders/McpToolProvider.cs
+index 7318921..6999b5a 100644
+--- a/src/Andy.Agentic.Infrastructure/Services/ToolProviders/McpToolProvider.cs
++++ b/src/Andy.Agentic.Infrastructure/Services/ToolProviders/McpToolProvider.cs
+@@ -25,7 25,7 @@ public class McpToolProvider(ILogger<McpToolProvider> logger) : IToolProvider
+         try
+         {
+             var configuration = ParseConfiguration(tool.Configuration);
+-            var auth = ParseAuthentication(tool.Authentication);
+            var auth = ParseHeaders(tool.Headers);
+ 
+             var endpoint = GetRequiredConfigValue<string>(configuration, "endpoint");
+             var mcpType = GetConfigValue(configuration, "mcpType", "stdio");
+@@ -156,19 156,43 @@ public class McpToolProvider(ILogger<McpToolProvider> logger) : IToolProvider
+         }
+     }
+ 
+-    private static Dictionary<string, object> ParseAuthentication(string? authentication)
+    private static Dictionary<string, object> ParseHeaders(string? headers)
+    {
+        if (string.IsNullOrEmpty(headers))
+         {
+-        if (string.IsNullOrEmpty(authentication))
+             return new Dictionary<string, object>();
+        }
+ 
+         try
+         {
+-            return JsonSerializer.Deserialize<Dictionary<string, object>>(authentication)
+-                   ?? new Dictionary<string, object>();
+            // Deserialize as array of JsonElement to avoid creating custom class
+            var headerArray = JsonSerializer.Deserialize<JsonElement[]>(headers);
+
+            if (headerArray == null)
+                return new Dictionary<string, object>();
+
+            var result = new Dictionary<string, object>();
+
+            foreach (var item in headerArray)
+            {
+                if (item.TryGetProperty("name", out var nameElement) &&
+                    item.TryGetProperty("value", out var valueElement))
+                {
+                    var name = nameElement.GetString();
+                    var value = valueElement.GetString();
+
+                    if (!string.IsNullOrEmpty(name))
+                    {
+                        result[name] = value ?? string.Empty;
+                    }
+                }
+            }
+
+            return result;
+         }
+         catch (JsonException ex)
+         {
+-            throw new ArgumentException("Invalid JSON in tool authentication", nameof(authentication), ex);
+            throw new ArgumentException("Invalid JSON in tool headers", nameof(headers), ex);
+         }
+     }
+ 
+diff --git a/src/Andy.Agentic/Controllers/AuthController.cs b/src/Andy.Agentic/Controllers/AuthController.cs
+index 46d1eb7..4358798 100644
+--- a/src/Andy.Agentic/Controllers/AuthController.cs
++++ b/src/Andy.Agentic/Controllers/AuthController.cs
+@@ -2,6 2,7 @@ using Andy.Agentic.Application.DTOs;
+ using Andy.Agentic.Application.Interfaces;
+ using Microsoft.AspNetCore.Authorization;
+ using Microsoft.AspNetCore.Mvc;
+using System.Security.Claims;
+ 
+ namespace Andy.Agentic.Controllers;
+ 
+@@ -48,7 49,7 @@ public class AuthController : ControllerBase
+         Console.WriteLine($"AuthController: SyncUser called. User.Identity.IsAuthenticated: {User.Identity?.IsAuthenticated}");
+         Console.WriteLine($"AuthController: User.Identity.Name: {User.Identity?.Name}");
+ 
+-        if (!User.Identity?.IsAuthenticated == true)
+        if (User.Identity?.IsAuthenticated != true)
+         {
+             Console.WriteLine("AuthController: User not authenticated");
+             return Unauthorized();
+@@ -61,23 62,38 @@ public class AuthController : ControllerBase
+             Console.WriteLine($"  {claim.Type}: {claim.Value}");
+         }
+ 
+        // Extract claims using the correct claim types from Azure AD v1.0 tokens
+         var azureAdId = User.FindFirst("oid")?.Value ??
+                         User.FindFirst("http://schemas.microsoft.com/identity/claims/objectidentifier")?.Value;
+-        var email = User.FindFirst("preferred_username")?.Value ??
+
+        // For email, prioritize UPN claim which contains the email in Azure AD v1.0 tokens
+        var email = User.FindFirst("http://schemas.xmlsoap.org/ws/2005/05/identity/claims/upn")?.Value ??
+                    User.FindFirst("upn")?.Value ??
+                    User.FindFirst("preferred_username")?.Value ??
+                     User.FindFirst("email")?.Value ??
+-                    User.FindFirst("upn")?.Value;
+                    User.FindFirst("http://schemas.xmlsoap.org/ws/2005/05/identity/claims/name")?.Value;
+
+         var displayName = User.FindFirst("name")?.Value ?? "Unknown User";
+-        var firstName = User.FindFirst("given_name")?.Value;
+-        var lastName = User.FindFirst("family_name")?.Value;
+
+        // Extract first and last names using the correct claim types
+        var firstName = User.FindFirst("http://schemas.xmlsoap.org/ws/2005/05/identity/claims/givenname")?.Value ??
+                       User.FindFirst("given_name")?.Value;
+
+        var lastName = User.FindFirst("http://schemas.xmlsoap.org/ws/2005/05/identity/claims/surname")?.Value ??
+                      User.FindFirst("family_name")?.Value;
+ 
+         Console.WriteLine($"AuthController: Extracted claims - AzureAdId: {azureAdId}, Email: {email}, DisplayName: {displayName}");
+        Console.WriteLine($"AuthController: Names - FirstName: {firstName}, LastName: {lastName}");
+ 
+         if (string.IsNullOrEmpty(azureAdId) || string.IsNullOrEmpty(email))
+         {
+             Console.WriteLine("AuthController: Required claims not found");
+-            return BadRequest("Required claims not found");
+            Console.WriteLine($"AuthController: Missing - AzureAdId: {string.IsNullOrEmpty(azureAdId)}, Email: {string.IsNullOrEmpty(email)}");
+            return BadRequest("Required claims (Object ID and Email/UPN) not found in token");
+         }
+ 
+        try
+        {
+             var user = await _authService.CreateOrUpdateUserAsync(azureAdId, email, displayName, firstName, lastName);
+             Console.WriteLine($"AuthController: User created/updated: {user?.Id}");
+ 
+@@ -87,6 103,12 @@ public class AuthController : ControllerBase
+                 User = user
+             });
+         }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"AuthController: Error creating/updating user: {ex.Message}");
+            return StatusCode(500, "Internal server error while processing user");
+        }
+    }
+ 
+     /// <summary>
+     /// Check authentication status
+diff --git a/src/Andy.Agentic/Program.cs b/src/Andy.Agentic/Program.cs
+index f4ff75a..36e426b 100644
+--- a/src/Andy.Agentic/Program.cs
++++ b/src/Andy.Agentic/Program.cs
+@@ -4,7 4,7 @@ var builder = WebApplication.CreateBuilder(args);
+ 
+ builder.WebHost.ConfigureKestrel(serverOptions =>
+ {
+-    serverOptions.ListenAnyIP(80);
+    serverOptions.ListenAnyIP(8080);
+ 
+     try
+     {
+diff --git a/src/Andy.Agentic/Startup.cs b/src/Andy.Agentic/Startup.cs
+index 8e79f2a..105229a 100644
+--- a/src/Andy.Agentic/Startup.cs
++++ b/src/Andy.Agentic/Startup.cs
+@@ -9,6 9,7 @@ using Andy.Agentic.Infrastructure.Mapping;
+ using Andy.Agentic.Infrastructure.Repositories;
+ using Andy.Agentic.Infrastructure.Repositories.Database;
+ using Andy.Agentic.Infrastructure.Repositories.Llm;
+using Andy.Agentic.Infrastructure.Semantic;
+ using Andy.Agentic.Infrastructure.Services;
+ using Andy.Agentic.Infrastructure.Services.ToolProviders;
+ using Andy.Agentic.Infrastructure.UnitOfWorks;
+@@ -51,6 52,8 @@ public class Startup
+         ConfigureCoreServices(services);
+         ConfigureHttpClient(services);
+         ConfigureToolProviders(services);
+        services.AddSemanticKernelBuilder();
+
+     }
+ 
+     /// <summary>
+@@ -74,17 77,10 @@ public class Startup
+         services.AddEndpointsApiExplorer();
+         services.AddSwaggerGen();
+ 
+-        // Add JWT Bearer authentication for Microsoft Graph tokens
+-        services.AddAuthentication("Bearer")
+-            .AddJwtBearer("Bearer", options =>
+-            {
+-                options.Authority = $"{ _configuration["AzureAd:Instance"]}{_configuration["AzureAd:TenantId"]}/v2.0";
+-                options.TokenValidationParameters = new Microsoft.IdentityModel.Tokens.TokenValidationParameters
+-                {
+-                    ValidateAudience = true,
+-                    ValidAudiences = new[] { $"{_configuration["AzureAd:Audience"]}", $"{_configuration["AzureAd:ClientId"]}" }
+-                };
+-            });
+
+        services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
+            .AddMicrosoftIdentityWebApi(_configuration.GetSection("AzureAd"));
+
+ 
+         services.AddAuthorization(options =>
+         {
+diff --git a/src/Andy.Agentic/appsettings.json b/src/Andy.Agentic/appsettings.json
+index c2e237c..04bb7a3 100644
+--- a/src/Andy.Agentic/appsettings.json
++++ b/src/Andy.Agentic/appsettings.json
+@@ -11,13 11,13 @@
+   },
+   "AllowedHosts": "*",
+   "ConnectionStrings": {
+-    "DefaultConnection": "Server=localhost;Database=Andy_db;User=root;Password=;Port=3306"
+    "DefaultConnection": "Server=localhost;Database=Andy_db;User=agentic_user;Password=Fok07onq11;Port=3306"
+   },
+   "AzureAd": {
+     "Instance": "https://login.microsoftonline.com/",
+-    "Audience": "api://andy-back",
+-    "TenantId": "1335991b-55a1-47b7-a4dd-177f429f0719",
+-    "ClientId": "55bd6449-4514-4186-81d9-59002182bc7f",
+    "Audience": "api://cd.afx.infradash-api",
+    "TenantId": "85f3dce2-9de5-43ba-8d73-76ef63954d34",
+    "ClientId": "62714976-8257-404a-bd07-d5d799144327",
+     "Scopes": "Api.Access"
+   }
+ }

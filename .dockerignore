@@ -1,0 +1,58 @@
+# .NET
+**/bin/
+**/obj/
+**/out/
+**/.vs/
+**/.vscode/
+
+# Test results
+TestResults/
+**/TestResults/
+
+# Coverage reports
+coverage/
+**/coverage/
+
+# Build artifacts
+**/publish/
+**/dist/
+
+# IDE files
+**/.idea/
+**/.vs/
+**/.vscode/
+**/*.user
+**/*.suo
+**/*.userosscache
+**/*.sln.docstates
+
+# OS generated files
+**/.DS_Store
+**/.DS_Store?
+**/._*
+**/.Spotlight-V100
+**/.Trashes
+**/ehthumbs.db
+**/Thumbs.db
+
+# Git
+**/.git/
+**/.gitignore
+
+# Docker
+**/Dockerfile*
+**/docker-compose*
+**/.dockerignore
+
+# Documentation
+**/README.md
+**/docs/
+**/examples/
+
+# Logs
+**/logs/
+**/*.log
+
+# Temporary files
+**/tmp/
+**/temp/
