@@ -1,4 +1,5 @@
 using System.Text;
+using Andy.Agentic.Domain.Helpers;
 using Andy.Agentic.Domain.Interfaces;
 using Andy.Agentic.Domain.Models;
 using Microsoft.Extensions.Logging;
@@ -76,7 +77,7 @@ public class SkillToolset(
     /// <summary>
     ///     Reads a bundled reference file from one attached skill, by name and relative path.
     /// </summary>
-    public async Task<string> ReadSkillFileAsync(string name, string path, CancellationToken cancellationToken = default)
+    public async Task<string> ReadSkillFileAsync(string name, string path, int offset = 0, int limit = 0, CancellationToken cancellationToken = default)
     {
         var skill = Match(name);
         if (skill is null)
@@ -91,8 +92,9 @@ public class SkillToolset(
 
         try
         {
-            return await registryClient.ReadFileAsync(
+            var content = await registryClient.ReadFileAsync(
                 skill.Registry, skill.Namespace, skill.SkillSlug, skill.Version, path, cancellationToken);
+            return SkillContentWindow.Window(content, offset, limit, path);
         }
         catch (Exception ex)
         {

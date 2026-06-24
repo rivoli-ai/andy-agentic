@@ -43,10 +43,12 @@ public class SkillPluginFactory(ISkillRegistryClient registryClient, ILogger<Ski
                              "Call this when a skill from list_skills is relevant to the task, then follow its instructions."),
 
             KernelFunctionFactory.CreateFromMethod(
-                method: async (string name, string path) => await toolset.ReadSkillFileAsync(name, path),
+                method: async (string name, string path, int offset, int limit) =>
+                    await toolset.ReadSkillFileAsync(name, path, offset, limit),
                 functionName: "read_skill_file",
                 description: "Read a bundled reference file from a skill, by skill name and relative file path " +
-                             "(paths come from the skill's instructions)."),
+                             "(paths come from the skill's instructions). Large files are paged: pass offset/limit, " +
+                             "and if the result says more remains, call again with the suggested offset."),
         };
 
         kernel.ImportPluginFromFunctions("skills", functions);

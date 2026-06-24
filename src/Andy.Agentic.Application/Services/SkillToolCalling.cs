@@ -1,5 +1,6 @@
 using System.Text;
 using System.Text.Json;
+using Andy.Agentic.Domain.Helpers;
 using Andy.Agentic.Domain.Interfaces;
 using Andy.Agentic.Domain.Models;
 
@@ -53,7 +54,8 @@ public static class SkillToolCalling
             {
                 Name = ReadSkillFile,
                 Description = "Read a bundled file referenced by a skill's instructions, by skill name and relative file path. "
-                              + "Use this when a loaded skill points to another file (template, script, reference).",
+                              + "Large files are returned in pages: if the result says more remains, call again with the "
+                              + "suggested offset to read the next part.",
                 Parameters = new FunctionParameters
                 {
                     Type = "object",
@@ -61,6 +63,8 @@ public static class SkillToolCalling
                     {
                         ["skill"] = new() { Type = "string", Description = "Exact name of the skill." },
                         ["path"] = new() { Type = "string", Description = "Relative path of the file inside the skill package." },
+                        ["offset"] = new() { Type = "integer", Description = "Start character for paging (default 0)." },
+                        ["limit"] = new() { Type = "integer", Description = "Max characters to return (default 40000)." },
                     },
                     Required = ["skill", "path"],
                 },
@@ -153,9 +157,11 @@ public static class SkillToolCalling
                 return (Log(false, "Missing 'path' argument for read_skill_file."), null);
             }
 
+            var offset = ParseInt(args, "offset");
+            var limit = ParseInt(args, "limit");
             var content = await registryClient.ReadFileAsync(
                 skill.Registry, skill.Namespace, skill.SkillSlug, skill.Version, path, cancellationToken);
-            return (Log(true, content), null);
+            return (Log(true, SkillContentWindow.Window(content, offset, limit, path)), null);
         }
         catch (Exception ex)
         {
@@ -204,6 +210,16 @@ public static class SkillToolCalling
         }
 
         return result;
+    }
+
+    private static int ParseInt(Dictionary<string, string> args, string key)
+    {
+        if (args.TryGetValue(key, out var v) && int.TryParse(v, out var n))
+        {
+            return n;
+        }
+
+        return 0;
     }
 
     private static string FirstNonEmpty(Dictionary<string, string> args, params string[] keys)
